@@ -24,7 +24,7 @@ class UserService:
             解析后的MSG数据，失败返回None
         """
         try:
-            response = self.client.request(1004, {"token": self.config.token})
+            response = self.client.request(1004, {})
             
             if not response.get("MSG"):
                 logger.error("Token无效或已过期")

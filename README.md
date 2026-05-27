@@ -67,17 +67,23 @@ python main.py
 `config.yaml` 配置项：
 
 ```yaml
-# 必填项
-token: "your_token"              # 用户认证token
+# ==================== 账号配置 ====================
+accounts:
+  - name: "账号1"              # 账号备注名称
+    token: "你的token"
+  
+  # 添加更多账号（可选）
+  # - name: "账号2"
+  #   token: "第二个账号的token"
 
-# 可选项（有默认值）
+# ==================== 全局配置 ====================
 api_base_url: "https://300zjd.tygms.cn/"  # API地址
 default_post_id: 8403            # 默认操作的帖子ID
 default_follow_id: "p492..."     # 默认关注的用户ID
 task_ids: [1,2,3,4,5,6,7,8,9]   # 要领取的任务ID列表
 request_delay: 1.0               # 请求间隔(秒)
+account_delay: 5.0               # 账号间延迟(秒)
 timeout: 30                      # 请求超时(秒)
-max_retries: 3                   # 最大重试次数
 ```
 
 ## ⏰ 定时执行
@@ -150,7 +156,6 @@ config_manager.py + logger.py (基础设施层)
 3. 如需新配置，在 `config.yaml` 和 `config_manager.py` 中添加
 
 详见代码注释和示例。
-
 
 ## 📝 更新日志
 

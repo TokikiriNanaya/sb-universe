@@ -2,7 +2,18 @@
 300英雄宅基地自动任务工具 - 配置模块
 """
 import yaml
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+
+
+class AccountConfig:
+    """单个账号配置"""
+    
+    def __init__(self, name: str, token: str):
+        self.name = name
+        self.token = token
+    
+    def __repr__(self):
+        return f"AccountConfig(name='{self.name}', token='{self.token[:8]}...')"
 
 
 class Config:
@@ -11,6 +22,7 @@ class Config:
     def __init__(self, config_path: str = 'config.yaml'):
         self.config_path = config_path
         self._config = self._load_config()
+        self._accounts = self._parse_accounts()
     
     def _load_config(self) -> Dict[str, Any]:
         """加载YAML配置文件"""
@@ -22,13 +34,32 @@ class Config:
         except yaml.YAMLError as e:
             raise ValueError(f"配置文件格式错误: {e}")
     
+    def _parse_accounts(self) -> List[AccountConfig]:
+        """解析账号配置"""
+        accounts = []
+        
+        # 从accounts列表中解析
+        if 'accounts' in self._config and self._config['accounts']:
+            for acc in self._config['accounts']:
+                name = acc.get('name', f'账号{len(accounts)+1}')
+                token = acc.get('token')
+                if token:
+                    accounts.append(AccountConfig(name=name, token=token))
+        
+        if not accounts:
+            raise ValueError("未配置任何账号，请在config.yaml的accounts中添加账号")
+        
+        return accounts
+    
     @property
-    def token(self) -> str:
-        """获取token"""
-        token = self._config.get('token')
-        if not token:
-            raise ValueError("Token未配置，请在config.yaml中设置")
-        return token
+    def accounts(self) -> List[AccountConfig]:
+        """获取所有账号配置"""
+        return self._accounts
+    
+    @property
+    def account_count(self) -> int:
+        """获取账号数量"""
+        return len(self._accounts)
     
     @property
     def api_base_url(self) -> str:
@@ -54,6 +85,11 @@ class Config:
     def request_delay(self) -> float:
         """获取请求延迟时间(秒)"""
         return self._config.get('request_delay', 1.0)
+    
+    @property
+    def account_delay(self) -> float:
+        """获取账号间延迟时间(秒)"""
+        return self._config.get('account_delay', 5.0)
     
     @property
     def max_retries(self) -> int:

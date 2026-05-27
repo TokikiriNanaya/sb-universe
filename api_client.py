@@ -57,21 +57,19 @@ class APIClient:
             'sec-ch-ua-platform': '"Android"',
         }
     
-    def request(self, msgid: int, data: Dict[str, Any], use_token: bool = True) -> Dict[str, Any]:
+    def request(self, msgid: int, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         发送API请求
-        
+            
         Args:
             msgid: 消息ID
             data: 请求数据
-            use_token: 是否使用token
-        
+            
         Returns:
             解析后的响应数据
         """
-        if use_token:
-            data['token'] = self.config.token
-        
+        # 自动添加token
+        data['token'] = self.config._config.get('token')
         data['msgid'] = msgid
         
         response = None

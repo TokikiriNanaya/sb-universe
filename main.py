@@ -24,8 +24,20 @@ def get_current_time() -> str:
 class TaskRunner:
     """任务执行器"""
     
-    def __init__(self):
-        self.config = Config()
+    def __init__(self, account: 'AccountConfig', global_config: Config):
+        """
+        初始化任务执行器
+        
+        Args:
+            account: 当前要执行的账号配置
+            global_config: 全局配置对象（已加载，包含所有配置项）
+        """
+        self.config = global_config
+        self.account = account
+        
+        # 设置当前账号的token到config中
+        self.config._config['token'] = account.token
+        
         self.client = APIClient(self.config)
         
         # 初始化服务
@@ -49,7 +61,8 @@ class TaskRunner:
         Returns:
             是否认证成功
         """
-        logger.info("正在验证Token...")
+        logger.info(f"正在验证Token... [{self.account.name}]")
+        
         msg_data = self.user_service.validate_token()
         
         if not msg_data:
@@ -190,21 +203,25 @@ class TaskRunner:
     def run(self):
         """运行任务"""
         try:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"开始处理账号: {self.account.name}")
+            logger.info(f"{'='*60}")
             logger.info(f"########## 脚本开始执行！ ########## {get_current_time()}")
             
             # 认证
             if not self.authenticate():
-                logger.error("认证失败，脚本退出")
+                logger.error(f"[{self.account.name}] 认证失败，跳过此账号")
                 return False
             
             # 执行任务
             self.execute_daily_tasks()
             
             logger.info(f"########## 脚本全部执行完毕！ ########## {get_current_time()}")
+            logger.info(f"[{self.account.name}] 任务完成")
             return True
             
         except Exception as e:
-            logger.error(f"脚本执行异常: {e}", exc_info=True)
+            logger.error(f"[{self.account.name}] 脚本执行异常: {e}", exc_info=True)
             return False
         
         finally:
@@ -214,11 +231,45 @@ class TaskRunner:
 
 def main():
     """主函数"""
-    runner = TaskRunner()
-    success = runner.run()
+    # 程序启动时只读取一次配置文件
+    global_config = Config()
+    
+    logger.info("="*60)
+    logger.info(f"检测到 {global_config.account_count} 个账号")
+    logger.info("="*60)
+    
+    success_count = 0
+    fail_count = 0
+    
+    # 遍历所有账号（使用已加载的配置，不再重复读取文件）
+    for i, account in enumerate(global_config.accounts, 1):
+        logger.info(f"\n{'#'*60}")
+        logger.info(f"# 处理进度: {i}/{global_config.account_count}")
+        logger.info(f"{'#'*60}")
+        
+        # 创建任务执行器，传入当前账号和全局配置
+        runner = TaskRunner(account=account, global_config=global_config)
+        success = runner.run()
+        
+        if success:
+            success_count += 1
+        else:
+            fail_count += 1
+        
+        # 如果不是最后一个账号，等待一段时间
+        if i < global_config.account_count:
+            logger.info(f"\n等待 {global_config.account_delay} 秒后处理下一个账号...")
+            time.sleep(global_config.account_delay)
+    
+    # 输出总结
+    logger.info("\n" + "="*60)
+    logger.info("所有账号处理完成！")
+    logger.info(f"成功: {success_count} 个账号")
+    logger.info(f"失败: {fail_count} 个账号")
+    logger.info("="*60)
     
     # 返回退出码
-    sys.exit(0 if success else 1)
+    sys.exit(0 if fail_count == 0 else 1)
 
 
 if __name__ == "__main__":
