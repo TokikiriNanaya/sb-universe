@@ -1,355 +1,225 @@
-import requests
-import yaml
-import ssl
+"""
+300英雄宅基地自动任务工具 - 主程序
+"""
+import sys
 import time
-import json  # 导入 json 模块用于解析 JSON 字符串
-from requests.adapters import HTTPAdapter
 from datetime import datetime
+from logger import logger
+from config_manager import Config
+from api_client import APIClient
+from services import (
+    UserService, 
+    PostService, 
+    SocialService, 
+    TaskService, 
+    StatsService
+)
 
 
-# 自定义适配器以使用 pyOpenSSL
-class PyOpenSSLAdapter(HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        context = ssl.create_default_context()
-        context.load_default_certs()
-        kwargs['ssl_context'] = context
-        return super(PyOpenSSLAdapter, self).init_poolmanager(*args, **kwargs)
-
-
-# 读取 YAML 配置文件
-def load_config(file_path):
-    with open(file_path, 'r', encoding='utf-8') as config_file:
-        return yaml.safe_load(config_file)
-
-
-def get_current_time():
-    """
-    返回当前时间的字符串，格式：YYYY-MM-DD HH:MM:SS
-    """
+def get_current_time() -> str:
+    """获取当前时间字符串"""
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-# 获取请求头
-def get_headers():
-    return {
-        'Accept': '*/*',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'zh-CN,zh;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Content-Type': 'application/json',
-        'Origin': 'http://300zjdclient.tygms.cn',
-        'Pragma': 'no-cache',
-        'Referer': 'http://300zjdclient.tygms.cn/',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'cross-site',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36',
-        'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
-        'sec-ch-ua-mobile': '?1',
-        'sec-ch-ua-platform': '"Android"',
-    }
-
-
-# 创建会话并使用自定义适配器
-session = requests.Session()
-session.mount('https://', PyOpenSSLAdapter())
-
-
-# 校验 token 请求
-def validate_token(token):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1004,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.json()  # 返回 JSON 格式的响应
-
-
-# 点赞请求
-def like_post(token, unique_id, posts_id, like_type):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1018,
-        "unique_id": unique_id,
-        "posts_id": posts_id,
-        "like_type": like_type,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 查询战绩请求
-def query_performance(token, unique_id, account_id, guid, role_name, role_id):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1009,
-        "AccountID": account_id,
-        "Guid": guid,
-        "RoleName": role_name,
-        "RoleID": role_id,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 查询历史战绩请求
-def query_history(token, unique_id, role_id, match_type, search_index):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1011,
-        "RoleID": role_id,
-        "MatchType": match_type,
-        "SearchIndex": search_index,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 关注请求
-def follow_user(token, unique_id, follow_id, follow_type):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1029,
-        "unique_id": unique_id,
-        "follow_id": follow_id,
-        "follow_type": follow_type,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 签到请求
-def sign_in(token, unique_id):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1073,
-        "unique_id": unique_id,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 一键领取请求
-def claim_rewards(token, unique_id, task_id_list):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1074,
-        "unique_id": unique_id,
-        "task_id_list": task_id_list,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 评论请求
-def comment_post(token, unique_id, posts_id, content):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1028,
-        "unique_id": unique_id,
-        "posts_id": posts_id,
-        "content": f"{content}",
-        "imgs": "",
-        "links": "{}",
-        "ats": "{}",
-        "extras": "{}",
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 发帖请求
-def create_post(token, unique_id, title, tabs_id, brief, content):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1017,
-        "unique_id": unique_id,
-        "title": title,
-        "tabs_id": tabs_id,
-        "brief": f"{brief}",
-        "content": f"{content}",
-        "imgs": "",
-        "links": "{}",
-        "topics": "",
-        "is_open": True,
-        "ats": "{}",
-        "from_post": 0,
-        "is_vote": False,
-        "extras": "{}",
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 删除贴子请求
-def delete_post(token, post_id, delete_type=1):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1085,
-        "type": delete_type,
-        "value": post_id,
-        "token": token
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 浏览贴子请求
-def view_post(unique_id, post_id):
-    url = "https://300zjd.tygms.cn/"
-    headers = get_headers()
-
-    data = {
-        "msgid": 1056,
-        "unique_id": unique_id,
-        "post_id": post_id
-    }
-
-    response = session.post(url, headers=headers, json=data)
-    return response.text
-
-
-# 发帖并删除贴子请求
-def create_and_delete_post(token, unique_id, title, tabs_id, brief, content):
-    # 发帖
-    create_response = create_post(token, unique_id, title, tabs_id, brief, content)
-
-    # 解析返回的JSON
-    response_data = json.loads(create_response)
-
-    # 检查发帖是否成功
-    if response_data["RES"] == 0 and "MSG" in response_data:
-        posts_id = response_data["MSG"]["Posts_Id"]
-        print(f"发帖成功，帖子ID: {posts_id}")
-        print("等待10秒后删除帖子...")
-        time.sleep(10)
-        delete_response = delete_post(token, posts_id)
-        print(f"删除帖子响应: {delete_response}")
-    else:
-        print(f"发帖失败: {create_response}")
-
-
-# 主程序
-if __name__ == "__main__":
-    print("########## 脚本开始执行！ ##########", get_current_time())
-    config = load_config('config.yaml')
-    token = config['token']
-
-    # 校验 token
-    validation_response = validate_token(token)
-    if not validation_response.get("MSG"):  # 检查 MSG 字段是否为空
-        print("Token 无效，请检查您的 token。")
-    else:
-        # 解析 MSG 字段
-        msg_data = json.loads(validation_response["MSG"])
-        unique_id = msg_data["UniqueId"]  # 保持为字符串
-        account_id = msg_data["JumpwUID"]
-        guid = msg_data["JumpwGuid"]
-        role_id = int(msg_data["JumpwRoleId"])  # 转换为整数
-        role_name = msg_data["JumpwRoleName"]
-
-        # 点赞
-        like_response = like_post(token, unique_id, 6697, 1)
-        print("点赞响应:", like_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 取消点赞
-        like_response = like_post(token, unique_id, 6697, 2)
-        print("取消点赞响应:", like_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 查询战绩
-        performance_response = query_performance(token, unique_id, account_id, guid, "", role_id)
-        print("查询战绩响应:", performance_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 查询历史战绩
-        history_response = query_history(token, unique_id, role_id, 1, 1)
-        print("查询历史战绩响应:", history_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 关注
-        follow_response = follow_user(token, unique_id, "p492210972677771264", 1)
-        print("关注响应:", follow_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 取消关注
-        follow_response = follow_user(token, unique_id, "p492210972677771264", 2)
-        print("取消关注响应:", follow_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 签到
-        sign_in_response = sign_in(token, unique_id)
-        print("签到响应:", sign_in_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 回帖
-        comment_post_response = comment_post(token, unique_id, 8403, get_current_time())
-        print("回帖响应:", comment_post_response)
-        time.sleep(1)  # 延迟1秒
-
-        # 发帖并删除
-        create_and_delete_post(
-            token=token,
-            unique_id=unique_id,
-            title=get_current_time(),
-            tabs_id=401,
-            brief="这是一个任务贴子",
-            content="这是一个任务贴子"
+class TaskRunner:
+    """任务执行器"""
+    
+    def __init__(self):
+        self.config = Config()
+        self.client = APIClient(self.config)
+        
+        # 初始化服务
+        self.user_service = UserService(self.client, self.config)
+        self.post_service = PostService(self.client, self.config)
+        self.social_service = SocialService(self.client, self.config)
+        self.task_service = TaskService(self.client, self.config)
+        self.stats_service = StatsService(self.client, self.config)
+        
+        # 用户信息
+        self.unique_id = None
+        self.account_id = None
+        self.guid = None
+        self.role_id = None
+        self.role_name = None
+    
+    def authenticate(self) -> bool:
+        """
+        认证用户
+        
+        Returns:
+            是否认证成功
+        """
+        logger.info("正在验证Token...")
+        msg_data = self.user_service.validate_token()
+        
+        if not msg_data:
+            return False
+        
+        # 保存用户信息
+        self.unique_id = msg_data["UniqueId"]
+        self.account_id = msg_data["JumpwUID"]
+        self.guid = msg_data["JumpwGuid"]
+        self.role_id = int(msg_data["JumpwRoleId"])
+        self.role_name = msg_data["JumpwRoleName"]
+        
+        logger.info(f"用户认证成功: {self.role_name} (ID: {self.role_id})")
+        return True
+    
+    def execute_daily_tasks(self):
+        """执行每日任务"""
+        logger.info("=" * 50)
+        logger.info("开始执行每日任务")
+        logger.info("=" * 50)
+        
+        # 1. 点赞和取消点赞
+        self._task_like_and_unlike()
+        
+        # 2. 查询战绩
+        self._task_query_stats()
+        
+        # 3. 关注和取消关注
+        self._task_follow_and_unfollow()
+        
+        # 4. 签到
+        self._task_sign_in()
+        
+        # 5. 评论
+        self._task_comment()
+        
+        # 6. 发帖并删除
+        self._task_create_and_delete_post()
+        
+        # 7. 浏览帖子
+        self._task_view_post()
+        
+        # 8. 领取任务奖励
+        self._task_claim_rewards()
+        
+        logger.info("=" * 50)
+        logger.info("所有任务执行完毕")
+        logger.info("=" * 50)
+    
+    def _task_like_and_unlike(self):
+        """任务: 点赞和取消点赞"""
+        logger.info("\n[任务] 点赞操作")
+        post_id = self.config.default_post_id
+        
+        self.post_service.like_post(self.unique_id, post_id, 1)
+        time.sleep(self.config.request_delay)
+        
+        self.post_service.like_post(self.unique_id, post_id, 2)
+    
+    def _task_query_stats(self):
+        """任务: 查询战绩"""
+        logger.info("\n[任务] 查询战绩")
+        
+        self.stats_service.query_performance(
+            self.account_id, 
+            self.guid, 
+            "", 
+            self.role_id
         )
-        time.sleep(1)  # 延迟1秒
+        time.sleep(self.config.request_delay)
+        
+        self.stats_service.query_history(
+            self.role_id, 
+            1, 
+            1
+        )
+        time.sleep(self.config.request_delay)
+    
+    def _task_follow_and_unfollow(self):
+        """任务: 关注和取消关注"""
+        logger.info("\n[任务] 关注操作")
+        follow_id = self.config.default_follow_id
+        
+        self.social_service.follow_user(self.unique_id, follow_id, 1)
+        time.sleep(self.config.request_delay)
+        
+        self.social_service.follow_user(self.unique_id, follow_id, 2)
+    
+    def _task_sign_in(self):
+        """任务: 签到"""
+        logger.info("\n[任务] 签到")
+        self.user_service.sign_in(self.unique_id)
+        time.sleep(self.config.request_delay)
+    
+    def _task_comment(self):
+        """任务: 评论帖子"""
+        logger.info("\n[任务] 评论帖子")
+        comment_content = f"水 - {get_current_time()}"
+        
+        self.post_service.comment_post(
+            self.unique_id, 
+            self.config.default_post_id, 
+            comment_content
+        )
+        time.sleep(self.config.request_delay)
+    
+    def _task_create_and_delete_post(self):
+        """任务: 发帖并删除"""
+        logger.info("\n[任务] 发帖并删除")
+        
+        title = f"这是一个任务帖子 - {get_current_time()}"
+        brief = "这是一个任务帖子"
+        content = "这是一个任务帖子"
+        
+        self.post_service.create_and_delete_post(
+            self.unique_id,
+            title,
+            tabs_id=401,
+            brief=brief,
+            content=content,
+            wait_time=10
+        )
+        time.sleep(self.config.request_delay)
+    
+    def _task_view_post(self):
+        """任务: 浏览帖子"""
+        logger.info("\n[任务] 浏览帖子")
+        
+        self.post_service.view_post(self.unique_id, self.config.default_post_id)
+    
+    def _task_claim_rewards(self):
+        """任务: 领取任务奖励"""
+        logger.info("\n[任务] 领取任务奖励")
+        
+        task_ids = self.config.task_ids
+        self.task_service.claim_all_rewards(self.unique_id, task_ids)
+    
+    def run(self):
+        """运行任务"""
+        try:
+            logger.info(f"########## 脚本开始执行！ ########## {get_current_time()}")
+            
+            # 认证
+            if not self.authenticate():
+                logger.error("认证失败，脚本退出")
+                return False
+            
+            # 执行任务
+            self.execute_daily_tasks()
+            
+            logger.info(f"########## 脚本全部执行完毕！ ########## {get_current_time()}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"脚本执行异常: {e}", exc_info=True)
+            return False
+        
+        finally:
+            # 清理资源
+            self.client.close()
 
-        # 浏览贴子
-        response = view_post(unique_id=unique_id, post_id=8403)
-        print("浏览贴子响应:", response)
-        time.sleep(1)  # 延迟1秒
 
-        # 一键领取
-        for i in range(1, 10):
-            claim_response = claim_rewards(token, unique_id, f"{i}")
-            print(f"领取任务id为{i}的任务奖励: {claim_response}")
-            time.sleep(1)  # 延迟1秒
+def main():
+    """主函数"""
+    runner = TaskRunner()
+    success = runner.run()
+    
+    # 返回退出码
+    sys.exit(0 if success else 1)
 
-        # 这里可以统计执行成功和失败的项目 失败的重新执行 但是我懒得做了 定时一个小时跑一遍得了
-        time.sleep(1)  # 延迟1秒
-        print("########## 脚本全部执行完毕！ ##########", get_current_time())
+
+if __name__ == "__main__":
+    main()

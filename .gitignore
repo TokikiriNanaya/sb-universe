@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Distribution / packaging
+dist.zip
+dist
+build
+main.spec
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environment
+.env
+.venv
