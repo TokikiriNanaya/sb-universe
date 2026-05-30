@@ -152,7 +152,7 @@ config_manager.py + logger.py (基础设施层)
 ### 添加新功能
 
 1. 在 `services.py` 中添加Service方法
-2. 在 `task_runner.py` 中调用
+2. 在 `main.py` 中调用
 3. 如需新配置，在 `config.yaml` 和 `config_manager.py` 中添加
 
 详见代码注释和示例。
