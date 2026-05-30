@@ -99,20 +99,20 @@ timeout: 30                      # 请求超时(秒)
 
 1. 打开"任务计划程序"
 2. 创建基本任务，设置触发器（如每小时）
-3. 操作：启动程序 `python`，参数 `task_runner.py`
+3. 操作：启动程序 `python`，参数 `main.py`
 
 ### 青龙面板（推荐）
 
 1. 上传项目到青龙面板
 2. 创建定时任务
-3. 命令：`python task_runner.py`
+3. 命令：`python main.py`
 
 ## 📁 项目结构
 
 ```
 sb-universe/
 ├── config.yaml          # 配置文件
-├── task_runner.py       # 主程序入口 ⭐
+├── main.py       # 主程序入口 ⭐
 │
 ├── config_manager.py    # 配置管理模块
 ├── logger.py           # 日志模块
@@ -128,7 +128,7 @@ sb-universe/
 采用分层架构：
 
 ```
-task_runner.py (表现层 - 任务编排)
+main.py (表现层 - 任务编排)
     ↓
 services.py (业务层 - 5个Service类)
     ↓
@@ -143,7 +143,7 @@ config_manager.py + logger.py (基础设施层)
 - **logger.py**: 日志系统
 - **api_client.py**: HTTP客户端
 - **services.py**: 业务服务（UserService, PostService, SocialService, TaskService, StatsService）
-- **task_runner.py**: 任务执行器
+- **main.py**: 任务执行器
 
 ## 💡 进阶使用
 
