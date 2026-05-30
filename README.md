@@ -40,7 +40,17 @@ python main.py
 
 ## 🔑 获取Token
 
-### 方法1: 手机抓包
+### 方法1: PC浏览器抓包（推荐）
+
+⚠️ 注意：会与手机端互相顶号
+
+1. 访问300宇宙 [https://300universe.tygms.com/](https://300universe.tygms.com/) 并登录
+2. 按F12打开开发者工具
+3. 依次点击 "应用" → "本地存储空间"，找到 `ClientToken`，复制value值
+
+   ![Token位置](assets/img_1.png)
+   
+### 方法2: 手机抓包
 
 使用HttpCanary等抓包工具（可能需要root权限）：
 
@@ -51,16 +61,6 @@ python main.py
 
 ![HttpCanary示例](assets/HttpCanary01.png)
 ![Token位置](assets/HttpCanary02.png)
-
-### 方法2: PC浏览器抓包（备选）
-
-⚠️ 注意：会与手机端互相顶号
-
-1. 访问300宇宙 [https://300universe.tygms.com/](https://300universe.tygms.com/) 并登录
-2. 按F12打开开发者工具
-3. 依次点击 "应用" → "本地存储空间"，找到 `ClientToken`，复制value值（不含引号）
-
-   ![Token位置](assets/img_1.png)
 
 ## ⚙️ 配置说明
 
