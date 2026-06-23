@@ -359,6 +359,36 @@ class TaskService:
         logger.info(f"任务奖励领取完成: {success_count}/{len(task_ids)} 成功")
         
         return results
+    
+    def buy_item(self, unique_id: str, shop_item_id: int = 26, address_id: int = 0) -> bool:
+        """
+        购买任务（商店购买道具）
+        
+        Args:
+            unique_id: 用户唯一ID
+            shop_item_id: 商品ID，默认26
+            address_id: 地址ID，默认0
+        
+        Returns:
+            是否成功
+        """
+        try:
+            response = self.client.request(1068, {
+                "unique_id": unique_id,
+                "shop_item_id": shop_item_id,
+                "address_id": address_id
+            })
+            
+            if response.get("RES") == 0:
+                logger.info(f"购买成功 (商品ID: {shop_item_id})")
+                return True
+            else:
+                logger.warning(f"购买失败 (商品ID: {shop_item_id}): {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"购买异常 (商品ID: {shop_item_id}): {e}")
+            return False
 
 
 class StatsService:

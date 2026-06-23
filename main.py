@@ -108,6 +108,9 @@ class TaskRunner:
         # 8. 领取任务奖励
         self._task_claim_rewards()
         
+        # 9. 购买任务
+        self._task_buy_item()
+        
         logger.info("=" * 50)
         logger.info("所有任务执行完毕")
         logger.info("=" * 50)
@@ -199,6 +202,12 @@ class TaskRunner:
         
         task_ids = self.config.task_ids
         self.task_service.claim_all_rewards(self.unique_id, task_ids)
+    
+    def _task_buy_item(self):
+        """任务: 购买道具"""
+        logger.info("\n[任务] 购买道具")
+        
+        self.task_service.buy_item(self.unique_id)
     
     def run(self):
         """运行任务"""

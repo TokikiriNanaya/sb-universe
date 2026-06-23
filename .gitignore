@@ -32,6 +32,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Config (contains sensitive tokens)
+config.yaml
+
 # Virtual environment
 .env
 .venv

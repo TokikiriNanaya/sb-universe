@@ -5,7 +5,7 @@
 # 在 accounts 可列表中添加多个账号，每个账号包含 name 和 token
 accounts:
   - name: "账号1" # 账号备注自行修改 用于多账号下方便区分
-    token: "这里填入你的token"
+    token: "这里填写你的token"
 
   # 添加更多账号示例（取消注释并填写token即可）
   # - name: "账号2"

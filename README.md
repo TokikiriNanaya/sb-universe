@@ -12,7 +12,13 @@ pip install -r requirements.txt
 
 ### 2. 配置Token
 
-编辑 `config.yaml` 文件：
+复制 `config_example.yaml` 为 `config.yaml` 并编辑：
+
+```bash
+cp config_example.yaml config.yaml
+```
+
+然后编辑 `config.yaml` 文件，填入你的 token：
 
 ```yaml
 token: 你的token在这里
@@ -111,8 +117,9 @@ timeout: 30                      # 请求超时(秒)
 
 ```
 sb-universe/
-├── config.yaml          # 配置文件
-├── task_runner.py       # 主程序入口 ⭐
+├── config_example.yaml  # 配置文件模板
+├── config.yaml          # 你的配置文件（需自行创建，不纳入版本控制）
+├── main.py              # 主程序入口 ⭐
 │
 ├── config_manager.py    # 配置管理模块
 ├── logger.py           # 日志模块
