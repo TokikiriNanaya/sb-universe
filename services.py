@@ -1,12 +1,31 @@
 """
 300英雄宅基地自动任务工具 - 业务服务模块
 """
-import time
 import json
 from typing import Dict, Any, Optional
 from logger import logger
 from config_manager import Config
 from api_client import APIClient
+from msgid import *
+
+
+def _extract_msg(response: Dict[str, Any]) -> Any:
+    """
+    从响应中提取MSG数据，兼容dict和JSON字符串两种格式
+
+    Args:
+        response: API响应
+
+    Returns:
+        MSG解析后的数据，无法解析返回None
+    """
+    msg = response.get("MSG")
+    if isinstance(msg, str):
+        try:
+            return json.loads(msg)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return msg
 
 
 class UserService:
@@ -24,13 +43,17 @@ class UserService:
             解析后的MSG数据，失败返回None
         """
         try:
-            response = self.client.request(1004, {})
+            response = self.client.request(ACCOUNT_LOGIN, {})
             
             if not response.get("MSG"):
                 logger.error("Token无效或已过期")
                 return None
             
-            msg_data = json.loads(response["MSG"])
+            msg_data = _extract_msg(response)
+            if msg_data is None:
+                logger.error("Token验证失败: MSG解析失败")
+                return None
+            
             logger.info("Token验证成功")
             return msg_data
             
@@ -49,7 +72,7 @@ class UserService:
             是否成功
         """
         try:
-            response = self.client.request(1073, {
+            response = self.client.request(RECEIVE_TASK_REWARD, {
                 "unique_id": unique_id
             })
             
@@ -62,6 +85,29 @@ class UserService:
                 
         except Exception as e:
             logger.error(f"签到异常: {e}")
+            return False
+    
+    def play_resonance_game(self) -> bool:
+        """
+        游玩共鸣引擎
+
+        Returns:
+            是否成功
+        """
+        try:
+            response = self.client.request(TASK_ACTION, {
+                "action": "resonance_game"
+            })
+            
+            if response.get("RES") == 0:
+                logger.info("共鸣引擎游玩成功")
+                return True
+            else:
+                logger.warning(f"共鸣引擎游玩失败: {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"共鸣引擎游玩异常: {e}")
             return False
 
 
@@ -86,7 +132,7 @@ class PostService:
         """
         action = "点赞" if like_type == 1 else "取消点赞"
         try:
-            response = self.client.request(1018, {
+            response = self.client.request(LIKE_POST, {
                 "unique_id": unique_id,
                 "posts_id": posts_id,
                 "like_type": like_type
@@ -116,7 +162,7 @@ class PostService:
             是否成功
         """
         try:
-            response = self.client.request(1028, {
+            response = self.client.request(GET_PERSONAL_POSTS, {
                 "unique_id": unique_id,
                 "posts_id": posts_id,
                 "content": content,
@@ -153,7 +199,7 @@ class PostService:
             帖子ID，失败返回None
         """
         try:
-            response = self.client.request(1017, {
+            response = self.client.request(PUBLISH_POST, {
                 "unique_id": unique_id,
                 "title": title,
                 "tabs_id": tabs_id,
@@ -170,7 +216,14 @@ class PostService:
             })
             
             if response.get("RES") == 0 and "MSG" in response:
-                posts_id = response["MSG"]["Posts_Id"]
+                msg_data = _extract_msg(response)
+                if msg_data is None:
+                    logger.warning(f"发帖失败: MSG解析失败: {response}")
+                    return None
+                posts_id = msg_data.get("Posts_Id")
+                if posts_id is None:
+                    logger.warning(f"发帖失败: 未获取到帖子ID: {response}")
+                    return None
                 logger.info(f"发帖成功 (帖子ID: {posts_id})")
                 return posts_id
             else:
@@ -193,7 +246,7 @@ class PostService:
             是否成功
         """
         try:
-            response = self.client.request(1085, {
+            response = self.client.request(DELETE_POST_REPLY_DETAIL, {
                 "type": delete_type,
                 "value": post_id
             })
@@ -221,7 +274,7 @@ class PostService:
             是否成功
         """
         try:
-            response = self.client.request(1056, {
+            response = self.client.request(GET_POST_DETAIL_CACHE, {
                 "unique_id": unique_id,
                 "post_id": post_id
             })
@@ -237,31 +290,48 @@ class PostService:
             logger.error(f"浏览帖子异常: {e}")
             return False
     
-    def create_and_delete_post(self, unique_id: str, title: str, tabs_id: int,
-                              brief: str, content: str, wait_time: int = 10) -> bool:
+    def get_post_list(self, unique_id: str, tabs_id: int = 401,
+                      pages: int = 1, post_type: int = 1) -> list:
         """
-        创建帖子并延迟删除
+        获取社区帖子列表（用于任务补足的点赞/浏览目标）
         
         Args:
             unique_id: 用户唯一ID
-            title: 标题
             tabs_id: 版块ID
-            brief: 简介
-            content: 内容
-            wait_time: 等待时间(秒)
+            pages: 页码
+            post_type: 帖子类型
         
         Returns:
-            是否成功
+            帖子列表 [{"postid": int, "uid": str}]
         """
-        posts_id = self.create_post(unique_id, title, tabs_id, brief, content)
-        
-        if not posts_id:
-            return False
-        
-        logger.info(f"等待{wait_time}秒后删除帖子...")
-        time.sleep(wait_time)
-        
-        return self.delete_post(posts_id)
+        try:
+            response = self.client.request(GET_POST_LIST, {
+                "unique_id": unique_id,
+                "tabs_id": tabs_id,
+                "pages": pages,
+                "type": post_type
+            })
+            
+            posts = []
+            if response.get("RES", 0) == 0 or "RES" not in response:
+                for key, value in response.items():
+                    if key in ("RES", "ERR", "MSG"):
+                        continue
+                    if value and value.get("id"):
+                        posts.append({
+                            "postid": int(value["id"]),
+                            "uid": (value.get("userInfo") or {}).get("uid", "")
+                        })
+            
+            if posts:
+                logger.info(f"获取帖子列表成功 ({len(posts)} 条)")
+            else:
+                logger.warning(f"获取帖子列表失败或无数据: {response}")
+            return posts
+                
+        except Exception as e:
+            logger.error(f"获取帖子列表异常: {e}")
+            return []
 
 
 class SocialService:
@@ -285,7 +355,7 @@ class SocialService:
         """
         action = "关注" if follow_type == 1 else "取消关注"
         try:
-            response = self.client.request(1029, {
+            response = self.client.request(GET_PERSONAL_INFO, {
                 "unique_id": unique_id,
                 "follow_id": follow_id,
                 "follow_type": follow_type
@@ -310,10 +380,35 @@ class TaskService:
         self.client = client
         self.config = config
     
+    def get_task_list(self, unique_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取任务列表（服务器每日随机下发）
+        
+        Args:
+            unique_id: 用户唯一ID
+        
+        Returns:
+            返回 MSG 数据（含 task_config / task_info / daily_sign），失败返回None
+        """
+        try:
+            response = self.client.request(GET_TASK_LIST, {
+                "unique_id": unique_id
+            })
+            
+            if response.get("RES") == 0:
+                return response.get("MSG") or {}
+            else:
+                logger.warning(f"获取任务列表失败: {response}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取任务列表异常: {e}")
+            return None
+    
     def claim_reward(self, unique_id: str, task_id: str) -> bool:
         """
-        领取任务奖励
-        
+        领取任务奖励（单个任务）
+
         Args:
             unique_id: 用户唯一ID
             task_id: 任务ID
@@ -322,7 +417,7 @@ class TaskService:
             是否成功
         """
         try:
-            response = self.client.request(1074, {
+            response = self.client.request(GET_BAG_LIST, {
                 "unique_id": unique_id,
                 "task_id_list": task_id
             })
@@ -338,27 +433,23 @@ class TaskService:
             logger.error(f"领取任务奖励异常 (任务ID: {task_id}): {e}")
             return False
     
-    def claim_all_rewards(self, unique_id: str, task_ids: list) -> Dict[str, bool]:
+    def claim_rewards_batch(self, unique_id: str, task_ids: list) -> bool:
         """
-        批量领取任务奖励
+        批量领取任务奖励（一次请求，task_id_list 逗号分隔）
         
         Args:
             unique_id: 用户唯一ID
             task_ids: 任务ID列表
         
         Returns:
-            每个任务的执行结果
+            是否成功
         """
-        results = {}
-        for task_id in task_ids:
-            success = self.claim_reward(unique_id, str(task_id))
-            results[str(task_id)] = success
-            time.sleep(self.config.request_delay)
+        if not task_ids:
+            logger.warning("批量领取失败: 任务ID列表为空")
+            return False
         
-        success_count = sum(1 for v in results.values() if v)
-        logger.info(f"任务奖励领取完成: {success_count}/{len(task_ids)} 成功")
-        
-        return results
+        task_id_list = ",".join(str(t) for t in task_ids)
+        return self.claim_reward(unique_id, task_id_list)
     
     def buy_item(self, unique_id: str, shop_item_id: int = 26, address_id: int = 0) -> bool:
         """
@@ -373,7 +464,7 @@ class TaskService:
             是否成功
         """
         try:
-            response = self.client.request(1068, {
+            response = self.client.request(GET_STORE_LIST, {
                 "unique_id": unique_id,
                 "shop_item_id": shop_item_id,
                 "address_id": address_id
@@ -413,7 +504,7 @@ class StatsService:
             战绩数据，失败返回None
         """
         try:
-            response = self.client.request(1009, {
+            response = self.client.request(GET_ROLE_INFO, {
                 "AccountID": account_id,
                 "Guid": guid,
                 "RoleName": role_name,
@@ -445,7 +536,7 @@ class StatsService:
             历史战绩数据，失败返回None
         """
         try:
-            response = self.client.request(1011, {
+            response = self.client.request(GET_USER_INFO, {
                 "RoleID": role_id,
                 "MatchType": match_type,
                 "SearchIndex": search_index

@@ -4,6 +4,7 @@
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 from logger import logger
 from config_manager import Config
 from api_client import APIClient
@@ -84,46 +85,92 @@ class TaskRunner:
         logger.info("开始执行每日任务")
         logger.info("=" * 50)
         
-        # 1. 点赞和取消点赞
-        self._task_like_and_unlike()
-        
-        # 2. 查询战绩
+        # 1. 查询战绩
         self._task_query_stats()
         
-        # 3. 关注和取消关注
+        # 2. 关注和取消关注
         self._task_follow_and_unfollow()
         
-        # 4. 签到
+        # 3. 签到
         self._task_sign_in()
         
-        # 5. 评论
-        self._task_comment()
+        # 4. 游玩共鸣引擎
+        self._task_play_resonance_game()
         
-        # 6. 发帖并删除
-        self._task_create_and_delete_post()
+        # 5. 发帖（创建新帖子，后续所有帖子操作都针对此帖）
+        post_id = self._task_create_post()
         
-        # 7. 浏览帖子
-        self._task_view_post()
+        # 6. 帖子相关操作（浏览 → 点赞 → 评论 → 删除）
+        if post_id:
+            # 浏览帖子（带重试，成功后才继续点赞和评论）
+            if self._task_view_post_with_retry(post_id):
+                self._task_like(post_id)
+                self._task_comment(post_id)
+            else:
+                logger.warning("浏览帖子最终失败，跳过点赞和评论操作")
+            # 删除帖子
+            self._task_delete_post(post_id)
         
-        # 8. 领取任务奖励
-        self._task_claim_rewards()
-        
-        # 9. 购买任务
+        # 7. 购买道具
         self._task_buy_item()
+        
+        # 8. 任务驱动补足（读取今日随机任务，按缺口补足动作次数）
+        self._task_fulfill_daily_tasks()
+        
+        # 9. 领取所有奖励（统一放到任务最后）
+        self._task_claim_monthly_rewards()      # 月度累计签到奖励
+        self._task_claim_resonance_reward()     # 共鸣引擎奖励
+        self._task_claim_rewards()              # 每日任务奖励
         
         logger.info("=" * 50)
         logger.info("所有任务执行完毕")
         logger.info("=" * 50)
     
-    def _task_like_and_unlike(self):
-        """任务: 点赞和取消点赞"""
+    def _task_create_post(self) -> Optional[int]:
+        """任务: 发帖（失败自动重试，返回帖子ID供后续操作使用）"""
+        logger.info("\n[任务] 发帖")
+        title = f"这是一个任务帖子 - {get_current_time()}"
+        brief = "这是一个任务帖子"
+        content = "这是一个任务帖子"
+        
+        max_retries = self.config.max_retries
+        retry_delay = self.config.retry_delay
+        
+        for attempt in range(1, max_retries + 1):
+            post_id = self.post_service.create_post(
+                self.unique_id,
+                title,
+                tabs_id=401,
+                brief=brief,
+                content=content
+            )
+            
+            if post_id:
+                logger.info(f"发帖成功，帖子ID: {post_id}，后续操作将针对此帖")
+                time.sleep(self.config.request_delay)
+                return post_id
+            
+            if attempt < max_retries:
+                logger.warning(
+                    f"发帖失败，{retry_delay}秒后重试 ({attempt}/{max_retries})..."
+                )
+                time.sleep(retry_delay)
+        
+        logger.error(f"发帖失败，已重试 {max_retries} 次，跳过帖子相关操作")
+        return None
+    
+    def _task_delete_post(self, post_id: int):
+        """任务: 删除帖子"""
+        logger.info("\n[任务] 删除帖子")
+        self.post_service.delete_post(post_id)
+        time.sleep(self.config.request_delay)
+    
+    def _task_like(self, post_id: int):
+        """任务: 点赞帖子（每次都是新帖，无需取消点赞）"""
         logger.info("\n[任务] 点赞操作")
-        post_id = self.config.default_post_id
         
         self.post_service.like_post(self.unique_id, post_id, 1)
         time.sleep(self.config.request_delay)
-        
-        self.post_service.like_post(self.unique_id, post_id, 2)
     
     def _task_query_stats(self):
         """任务: 查询战绩"""
@@ -160,54 +207,241 @@ class TaskRunner:
         self.user_service.sign_in(self.unique_id)
         time.sleep(self.config.request_delay)
     
-    def _task_comment(self):
-        """任务: 评论帖子"""
+    def _task_claim_monthly_rewards(self):
+        """任务: 领取月度累计签到奖励（3天/7天/15天/28天，一次批量领取）"""
+        logger.info("\n[任务] 领取月度累计签到奖励")
+        task_ids = self.config.monthly_signin_task_ids
+        self.task_service.claim_rewards_batch(self.unique_id, task_ids)
+    
+    def _task_play_resonance_game(self):
+        """任务: 游玩共鸣引擎（奖励在最后统一领取）"""
+        logger.info("\n[任务] 游玩共鸣引擎")
+        self.user_service.play_resonance_game()
+        time.sleep(self.config.request_delay)
+    
+    def _task_claim_resonance_reward(self):
+        """任务: 领取共鸣引擎任务奖励"""
+        logger.info("\n[任务] 领取共鸣引擎任务奖励")
+        self.task_service.claim_reward(self.unique_id, "3003")
+        time.sleep(self.config.request_delay)
+    
+    def _task_comment(self, post_id: int):
+        """任务: 评论帖子（针对指定帖子）"""
         logger.info("\n[任务] 评论帖子")
         comment_content = f"水 - {get_current_time()}"
         
         self.post_service.comment_post(
             self.unique_id, 
-            self.config.default_post_id, 
+            post_id, 
             comment_content
         )
         time.sleep(self.config.request_delay)
     
-    def _task_create_and_delete_post(self):
-        """任务: 发帖并删除"""
-        logger.info("\n[任务] 发帖并删除")
-        
-        title = f"这是一个任务帖子 - {get_current_time()}"
-        brief = "这是一个任务帖子"
-        content = "这是一个任务帖子"
-        
-        self.post_service.create_and_delete_post(
-            self.unique_id,
-            title,
-            tabs_id=401,
-            brief=brief,
-            content=content,
-            wait_time=10
-        )
-        time.sleep(self.config.request_delay)
-    
-    def _task_view_post(self):
-        """任务: 浏览帖子"""
+    def _task_view_post_with_retry(self, post_id: int) -> bool:
+        """任务: 浏览帖子（带重试，成功后才继续点赞等后续操作）"""
         logger.info("\n[任务] 浏览帖子")
         
-        self.post_service.view_post(self.unique_id, self.config.default_post_id)
+        max_retries = self.config.max_retries
+        retry_delay = self.config.retry_delay
+        
+        for attempt in range(1, max_retries + 1):
+            if self.post_service.view_post(self.unique_id, post_id):
+                return True
+            
+            if attempt < max_retries:
+                logger.warning(
+                    f"浏览帖子失败，{retry_delay}秒后重试 ({attempt}/{max_retries})..."
+                )
+                time.sleep(retry_delay)
+        
+        logger.error(f"浏览帖子失败，已重试 {max_retries} 次 (帖子ID: {post_id})")
+        return False
     
     def _task_claim_rewards(self):
-        """任务: 领取任务奖励"""
+        """任务: 领取每日任务奖励（动态获取今日随机任务，批量领取可领取的）"""
         logger.info("\n[任务] 领取任务奖励")
         
-        task_ids = self.config.task_ids
-        self.task_service.claim_all_rewards(self.unique_id, task_ids)
+        # 动态获取今日任务配置（任务每天随机，由服务器下发）
+        task_data = self.task_service.get_task_list(self.unique_id)
+        if not task_data:
+            logger.warning("获取任务列表失败，跳过领奖（下次运行会自动重试）")
+            return
+        
+        task_config = task_data.get("task_config") or []
+        task_info = task_data.get("task_info") or []
+        task_info_map = {
+            str(t.get("task_id")): t
+            for t in task_info if isinstance(t, dict)
+        }
+        
+        # 筛选可领取任务：进度达标(progress>=times) 且 未领取(reward_time==0)
+        claimable = []
+        for task in task_config:
+            task_id = str(task.get("id"))
+            times = task.get("condition_times") or 0
+            info = task_info_map.get(task_id)
+            progress = info.get("task_progress", 0) if info else 0
+            reward_time = info.get("reward_time", 0) if info else 0
+            
+            if reward_time > 0:
+                continue  # 已领取
+            if progress >= times:
+                claimable.append(task_id)
+        
+        if not claimable:
+            logger.info("今日暂无可以领取的任务奖励")
+            return
+        
+        logger.info(f"今日可领取任务: {claimable}")
+        self.task_service.claim_rewards_batch(self.unique_id, claimable)
     
     def _task_buy_item(self):
-        """任务: 购买道具"""
+        """任务: 购买道具（shop_item_id=26, address_id=0 为固定任务商品）"""
         logger.info("\n[任务] 购买道具")
         
         self.task_service.buy_item(self.unique_id)
+    
+    def _task_create_and_process_post(self) -> bool:
+        """创建新帖并完成 浏览→点赞→评论→删除 全流程（任务补足用）"""
+        post_id = self._task_create_post()  # 带重试
+        if not post_id:
+            return False
+        
+        if self._task_view_post_with_retry(post_id):
+            self._task_like(post_id)
+            self._task_comment(post_id)
+        
+        self._task_delete_post(post_id)
+        return True
+    
+    def _task_fulfill_daily_tasks(self):
+        """任务驱动补足：读取今日随机任务，按缺口补足动作次数"""
+        logger.info("\n[任务] 任务驱动补足")
+        
+        task_data = self.task_service.get_task_list(self.unique_id)
+        if not task_data:
+            logger.warning("获取任务列表失败，跳过补足")
+            return
+        
+        task_config = task_data.get("task_config") or []
+        task_info = task_data.get("task_info") or []
+        info_map = {
+            str(t.get("task_id")): t
+            for t in task_info if isinstance(t, dict)
+        }
+        
+        # 统计各类型任务缺口（仅每日任务 group==0）
+        gaps = {
+            "sign": 0, "publish": 0, "like": 0, "follow": 0,
+            "buy": 0, "stats": 0, "view": 0, "resonance": 0
+        }
+        
+        for task in task_config:
+            if task.get("group") != 0:
+                continue
+            task_id = str(task.get("id"))
+            task_type = task.get("task_type")
+            times = task.get("condition_times") or 0
+            info = info_map.get(task_id)
+            progress = info.get("task_progress", 0) if info else 0
+            reward_time = info.get("reward_time", 0) if info else 0
+            
+            if reward_time > 0:
+                continue
+            gap = max(0, times - progress)
+            if gap <= 0:
+                continue
+            
+            if task_type == 1:              # 签到
+                gaps["sign"] = max(gaps["sign"], gap)
+            elif task_type in (2, 17):      # 发帖 / 发布图文贴
+                gaps["publish"] += gap
+            elif task_type == 3:            # 点赞
+                gaps["like"] += gap
+            elif task_type == 4:            # 关注
+                gaps["follow"] += gap
+            elif task_type == 5:            # 购买
+                gaps["buy"] += gap
+            elif task_type == 6:            # 查询战绩
+                gaps["stats"] += gap
+            elif task_type == 10:           # 浏览帖子
+                gaps["view"] += gap
+            elif task_type == 16:           # 共鸣引擎
+                gaps["resonance"] += gap
+        
+        if sum(gaps.values()) == 0:
+            logger.info("今日任务均已满足，无需补足")
+            return
+        
+        logger.info(f"任务缺口: {gaps}")
+        
+        # 1. 签到补足（daily_sign>0 说明今日已签到，跳过）
+        if gaps["sign"] > 0:
+            daily_sign = task_data.get("daily_sign", 0)
+            if daily_sign > 0:
+                logger.info("今日已签到，跳过签到补足")
+            else:
+                for _ in range(gaps["sign"]):
+                    self.user_service.sign_in(self.unique_id)
+                    time.sleep(self.config.request_delay)
+        
+        # 2. 共鸣引擎补足
+        for _ in range(gaps["resonance"]):
+            self.user_service.play_resonance_game()
+            time.sleep(self.config.request_delay)
+        
+        # 3. 查询战绩补足
+        for _ in range(gaps["stats"]):
+            self.stats_service.query_performance(
+                self.account_id, self.guid, "", self.role_id
+            )
+            time.sleep(self.config.request_delay)
+            self.stats_service.query_history(self.role_id, 1, 1)
+            time.sleep(self.config.request_delay)
+        
+        # 4. 购买补足
+        for _ in range(gaps["buy"]):
+            self.task_service.buy_item(self.unique_id)
+            time.sleep(self.config.request_delay)
+        
+        # 5. 发帖补足（发帖循环同时贡献发帖/浏览/点赞/评论进度）
+        need_posts = max(gaps["publish"], gaps["view"], gaps["like"])
+        max_extra_posts = 3  # 上限，避免发太多帖触发风控
+        post_count = min(need_posts, max_extra_posts)
+        for _ in range(post_count):
+            if self._task_create_and_process_post():
+                gaps["publish"] = max(0, gaps["publish"] - 1)
+                gaps["view"] = max(0, gaps["view"] - 1)
+                gaps["like"] = max(0, gaps["like"] - 1)
+        
+        # 6. 剩余浏览/点赞用社区帖子补足
+        remaining = max(gaps["view"], gaps["like"])
+        if remaining > 0:
+            community_posts = self.post_service.get_post_list(self.unique_id)
+            for post in community_posts:
+                if remaining <= 0:
+                    break
+                post_id = post["postid"]
+                if gaps["view"] > 0:
+                    self.post_service.view_post(self.unique_id, post_id)
+                    time.sleep(self.config.request_delay)
+                    gaps["view"] -= 1
+                    remaining -= 1
+                if gaps["like"] > 0:
+                    self.post_service.like_post(self.unique_id, post_id, 1)
+                    time.sleep(self.config.request_delay)
+                    gaps["like"] -= 1
+                    remaining -= 1
+            if remaining > 0:
+                logger.warning(f"社区帖子不足，仍有 {remaining} 次浏览/点赞未补足")
+        
+        # 7. 关注补足（对默认关注ID交替关注/取关）
+        for i in range(gaps["follow"]):
+            follow_type = 1 if i % 2 == 0 else 2
+            self.social_service.follow_user(
+                self.unique_id, self.config.default_follow_id, follow_type
+            )
+            time.sleep(self.config.request_delay)
     
     def run(self):
         """运行任务"""

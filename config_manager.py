@@ -67,19 +67,14 @@ class Config:
         return self._config.get('api_base_url', 'https://300zjd.tygms.cn/')
     
     @property
-    def default_post_id(self) -> int:
-        """获取默认帖子ID"""
-        return self._config.get('default_post_id', 8403)
-    
-    @property
     def default_follow_id(self) -> str:
         """获取默认关注用户ID"""
         return self._config.get('default_follow_id', 'p492210972677771264')
     
     @property
-    def task_ids(self) -> list:
-        """获取任务ID列表"""
-        return self._config.get('task_ids', list(range(1, 10)))
+    def monthly_signin_task_ids(self) -> list:
+        """获取月度累计签到奖励ID列表 (3天/7天/15天/28天)"""
+        return self._config.get('monthly_signin_task_ids', [2001, 2002, 2003, 2004])
     
     @property
     def request_delay(self) -> float:
@@ -95,6 +90,11 @@ class Config:
     def max_retries(self) -> int:
         """获取最大重试次数"""
         return self._config.get('max_retries', 3)
+    
+    @property
+    def retry_delay(self) -> float:
+        """获取重试间隔时间(秒)"""
+        return self._config.get('retry_delay', 5.0)
     
     @property
     def timeout(self) -> int:

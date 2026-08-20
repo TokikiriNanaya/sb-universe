@@ -1,6 +1,7 @@
 """
 300英雄宅基地自动任务工具 - HTTP客户端模块
 """
+import time
 import requests
 import ssl
 import json
@@ -59,7 +60,7 @@ class APIClient:
     
     def request(self, msgid: int, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        发送API请求
+        发送API请求（网络异常自动重试）
             
         Args:
             msgid: 消息ID
@@ -72,24 +73,35 @@ class APIClient:
         data['token'] = self.config._config.get('token')
         data['msgid'] = msgid
         
+        max_retries = self.config.max_retries
+        retry_delay = self.config.retry_delay
+        
         response = None
-        try:
-            response = self.session.post(
-                self.config.api_base_url,
-                headers=self.headers,
-                json=data,
-                timeout=self.config.timeout
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"请求失败 (msgid={msgid}): {e}")
-            raise
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON解析失败 (msgid={msgid}): {e}")
-            if response is not None:
-                logger.debug(f"响应内容: {response.text}")
-            raise
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.session.post(
+                    self.config.api_base_url,
+                    headers=self.headers,
+                    json=data,
+                    timeout=self.config.timeout
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                logger.error(f"请求失败 (msgid={msgid}): {e}")
+                if attempt < max_retries:
+                    logger.warning(f"{retry_delay}秒后重试 ({attempt}/{max_retries})...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON解析失败 (msgid={msgid}): {e}")
+                if response is not None:
+                    logger.debug(f"响应内容: {response.text}")
+                raise
+        
+        # 循环结束后理论上不可达（最后一次重试失败会raise）
+        raise RuntimeError("unreachable")
     
     def close(self):
         """关闭session"""

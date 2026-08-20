@@ -2,7 +2,6 @@
 300英雄宅基地自动任务工具 - 日志模块
 """
 import logging
-from datetime import datetime
 
 
 def setup_logger(name: str = 'SBUniverse', log_level: int = logging.INFO) -> logging.Logger:
