@@ -17,6 +17,8 @@ TASK_ACTION = 1116              # 任务动作（action 区分，如 resonance_g
 PUBLISH_POST = 1017             # 发帖
 LIKE_POST = 1018                # 点赞/取消点赞（like_type: 1=赞 2=取消）
 GET_PERSONAL_POSTS = 1028       # 评论/回复帖子
+GET_FANS_LIST = 1027            # 我的发布列表（枚举名误导，参数: unique_id+other_unique_id+pages）
+GET_USER_DETAIL = 1032          # 我的关注列表（枚举名误导，之前误用于"我的发布"）
 GET_POST_LIST = 1033            # 获取帖子列表（社区，响应为对象，id=帖ID userInfo.uid=作者）
 GET_POST_DETAIL_CACHE = 1056    # 浏览帖子（post_id）
 DELETE_POST_REPLY_DETAIL = 1085 # 删除（type=1 删帖 / 2、3 删回复，value=ID）
@@ -26,3 +28,16 @@ GET_PERSONAL_INFO = 1029        # 关注/取消关注（follow_id + follow_type 
 
 # ==================== 商城相关 ====================
 GET_STORE_LIST = 1068           # 购买道具（shop_item_id + address_id）
+
+# 写操作接口：超时后不确定是否已执行，网络层不对其做"超时重试"，防止重复执行
+WRITE_MSGIDS = {
+    PUBLISH_POST,                # 发帖
+    LIKE_POST,                   # 点赞
+    GET_PERSONAL_POSTS,          # 评论
+    GET_PERSONAL_INFO,           # 关注
+    GET_STORE_LIST,              # 购买
+    RECEIVE_TASK_REWARD,         # 签到
+    GET_BAG_LIST,                # 领奖
+    DELETE_POST_REPLY_DETAIL,    # 删除
+    TASK_ACTION,                 # 任务动作（共鸣引擎）
+}

@@ -97,10 +97,13 @@ class TaskRunner:
         # 4. 游玩共鸣引擎
         self._task_play_resonance_game()
         
-        # 5. 发帖（创建新帖子，后续所有帖子操作都针对此帖）
+        # 5. 清理残留任务帖（上次运行发帖超时未删除的）
+        self._task_cleanup_stale_posts()
+        
+        # 6. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试）
         post_id = self._task_create_post()
         
-        # 6. 帖子相关操作（浏览 → 点赞 → 评论 → 删除）
+        # 7. 帖子相关操作（浏览 → 点赞 → 评论 → 删除）
         if post_id:
             # 浏览帖子（带重试，成功后才继续点赞和评论）
             if self._task_view_post_with_retry(post_id):
@@ -111,13 +114,13 @@ class TaskRunner:
             # 删除帖子
             self._task_delete_post(post_id)
         
-        # 7. 购买道具
+        # 8. 购买道具
         self._task_buy_item()
         
-        # 8. 任务驱动补足（读取今日随机任务，按缺口补足动作次数）
+        # 9. 任务驱动补足（读取今日随机任务，按缺口补足动作次数）
         self._task_fulfill_daily_tasks()
         
-        # 9. 领取所有奖励（统一放到任务最后）
+        # 10. 领取所有奖励（统一放到任务最后）
         self._task_claim_monthly_rewards()      # 月度累计签到奖励
         self._task_claim_resonance_reward()     # 共鸣引擎奖励
         self._task_claim_rewards()              # 每日任务奖励
@@ -126,8 +129,43 @@ class TaskRunner:
         logger.info("所有任务执行完毕")
         logger.info("=" * 50)
     
+    def _is_task_post(self, post: dict) -> bool:
+        """
+        判断帖子是否为脚本生成的任务帖（标题+简介双重匹配，避免误删用户手动发的帖子）
+        
+        任务帖特征：标题以"这是一个任务帖子"开头，且简介固定为"这是一个任务帖子"
+        """
+        title = post.get("title") or ""
+        brief = post.get("brief") or ""
+        return title.startswith("这是一个任务帖子") and brief == "这是一个任务帖子"
+    
+    def _find_just_created_post(self) -> Optional[int]:
+        """查询最近发布的匹配任务标题的帖子（发帖超时后确认是否已实际发布）"""
+        my_posts = self.post_service.get_my_posts(self.unique_id)
+        for post in my_posts:
+            if self._is_task_post(post):
+                return post["postid"]
+        return None
+    
+    def _task_cleanup_stale_posts(self):
+        """清理历史残留的任务帖（上次运行发帖超时未删除的；只删任务帖，不动用户帖子）"""
+        logger.info("\n[任务] 清理残留任务帖")
+        my_posts = self.post_service.get_my_posts(self.unique_id)
+        removed = 0
+        for post in my_posts:
+            if not self._is_task_post(post):
+                continue
+            if self.post_service.delete_post(post["postid"]):
+                removed += 1
+            time.sleep(self.config.request_delay)
+        
+        if removed > 0:
+            logger.info(f"已清理 {removed} 个残留任务帖")
+        else:
+            logger.info("无残留任务帖")
+    
     def _task_create_post(self) -> Optional[int]:
-        """任务: 发帖（失败自动重试，返回帖子ID供后续操作使用）"""
+        """任务: 发帖（失败自动确认重试，返回帖子ID供后续操作使用）"""
         logger.info("\n[任务] 发帖")
         title = f"这是一个任务帖子 - {get_current_time()}"
         brief = "这是一个任务帖子"
@@ -150,9 +188,18 @@ class TaskRunner:
                 time.sleep(self.config.request_delay)
                 return post_id
             
+            # 失败后先查询确认：请求超时但帖子可能已实际发布，避免重复发帖
+            confirmed_id = self._find_just_created_post()
+            if confirmed_id is not None:
+                logger.info(
+                    f"检测到帖子实际已发布成功 (帖子ID: {confirmed_id})，复用该帖子，不再重复发帖"
+                )
+                time.sleep(self.config.request_delay)
+                return confirmed_id
+            
             if attempt < max_retries:
                 logger.warning(
-                    f"发帖失败，{retry_delay}秒后重试 ({attempt}/{max_retries})..."
+                    f"发帖失败且未检测到已发布帖子，{retry_delay}秒后重试 ({attempt}/{max_retries})..."
                 )
                 time.sleep(retry_delay)
         
@@ -314,15 +361,8 @@ class TaskRunner:
         self._task_delete_post(post_id)
         return True
     
-    def _task_fulfill_daily_tasks(self):
-        """任务驱动补足：读取今日随机任务，按缺口补足动作次数"""
-        logger.info("\n[任务] 任务驱动补足")
-        
-        task_data = self.task_service.get_task_list(self.unique_id)
-        if not task_data:
-            logger.warning("获取任务列表失败，跳过补足")
-            return
-        
+    def _calc_task_gaps(self, task_data: dict) -> dict:
+        """解析任务列表，计算各类型任务缺口（仅 group==0 可自动化的每日任务）"""
         task_config = task_data.get("task_config") or []
         task_info = task_data.get("task_info") or []
         info_map = {
@@ -330,7 +370,6 @@ class TaskRunner:
             for t in task_info if isinstance(t, dict)
         }
         
-        # 统计各类型任务缺口（仅每日任务 group==0）
         gaps = {
             "sign": 0, "publish": 0, "like": 0, "follow": 0,
             "buy": 0, "stats": 0, "view": 0, "resonance": 0
@@ -369,12 +408,10 @@ class TaskRunner:
             elif task_type == 16:           # 共鸣引擎
                 gaps["resonance"] += gap
         
-        if sum(gaps.values()) == 0:
-            logger.info("今日任务均已满足，无需补足")
-            return
-        
-        logger.info(f"任务缺口: {gaps}")
-        
+        return gaps
+    
+    def _execute_fulfillment(self, gaps: dict, task_data: dict):
+        """执行任务补足动作"""
         # 1. 签到补足（daily_sign>0 说明今日已签到，跳过）
         if gaps["sign"] > 0:
             daily_sign = task_data.get("daily_sign", 0)
@@ -442,6 +479,30 @@ class TaskRunner:
                 self.unique_id, self.config.default_follow_id, follow_type
             )
             time.sleep(self.config.request_delay)
+    
+    def _task_fulfill_daily_tasks(self):
+        """任务完成闭环：检查任务完成情况 → 未完成的重试补足 → 复查，直到满足或达最大轮数"""
+        logger.info("\n[任务] 任务完成检查与补足")
+        
+        max_rounds = 3  # 最大补足轮数，防止不可自动化任务无限重试
+        
+        for round_idx in range(1, max_rounds + 1):
+            task_data = self.task_service.get_task_list(self.unique_id)
+            if not task_data:
+                logger.warning("获取任务列表失败，跳过本轮检查")
+                return
+            
+            gaps = self._calc_task_gaps(task_data)
+            if sum(gaps.values()) == 0:
+                logger.info(f"第{round_idx}轮检查: 所有可自动化任务均已完成")
+                return
+            
+            logger.info(f"第{round_idx}轮检查: 任务缺口 {gaps}")
+            self._execute_fulfillment(gaps, task_data)
+        
+        logger.warning(
+            f"经过 {max_rounds} 轮补足仍有任务未完成，可能为不可自动化任务（如邀请/收藏），等待下次运行"
+        )
     
     def run(self):
         """运行任务"""

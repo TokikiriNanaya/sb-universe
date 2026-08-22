@@ -9,6 +9,7 @@ from requests.adapters import HTTPAdapter
 from typing import Dict, Any, Optional
 from logger import logger
 from config_manager import Config
+from msgid import WRITE_MSGIDS
 
 
 class PyOpenSSLAdapter(HTTPAdapter):
@@ -61,6 +62,12 @@ class APIClient:
     def request(self, msgid: int, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         发送API请求（网络异常自动重试）
+        
+        重试策略：
+        - 连接失败(ConnectTimeout/ConnectionError)：请求可能未送达，安全重试
+        - 读取超时(ReadTimeout/Timeout)：请求可能已执行，写操作放弃重试
+          防止重复执行（如重复发帖/评论/购买），读操作继续重试
+        - 其他请求异常：按配置重试
             
         Args:
             msgid: 消息ID
@@ -87,6 +94,27 @@ class APIClient:
                 )
                 response.raise_for_status()
                 return response.json()
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as e:
+                # 连接阶段失败：请求大概率未送达，安全重试
+                logger.error(f"连接失败 (msgid={msgid}): {e}")
+                if attempt < max_retries:
+                    logger.warning(f"{retry_delay}秒后重试 ({attempt}/{max_retries})...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout) as e:
+                # 请求已发出但未等到响应：可能已执行
+                logger.error(f"请求超时 (msgid={msgid}): {e}")
+                if msgid in WRITE_MSGIDS:
+                    logger.warning(
+                        f"写操作超时，放弃重试以避免重复执行 (msgid={msgid})"
+                    )
+                    raise
+                if attempt < max_retries:
+                    logger.warning(f"{retry_delay}秒后重试 ({attempt}/{max_retries})...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
             except requests.exceptions.RequestException as e:
                 logger.error(f"请求失败 (msgid={msgid}): {e}")
                 if attempt < max_retries:

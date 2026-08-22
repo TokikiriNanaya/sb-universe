@@ -28,6 +28,29 @@ def _extract_msg(response: Dict[str, Any]) -> Any:
     return msg
 
 
+def _extract_items(response: Any) -> list:
+    """
+    从列表类接口响应中提取帖子条目，兼容三种格式：
+    1. 数组 [ {...}, {...} ]
+    2. 对象映射 {"1": {...}, "2": {...}}
+    3. 带RES包装的 {"RES":0, "1": {...}}（跳过 RES/ERR/MSG 键）
+
+    Args:
+        response: API响应
+
+    Returns:
+        条目列表（dict 元素）
+    """
+    if isinstance(response, list):
+        return [v for v in response if isinstance(v, dict)]
+    if isinstance(response, dict):
+        return [
+            v for k, v in response.items()
+            if k not in ("RES", "ERR", "MSG") and isinstance(v, dict)
+        ]
+    return []
+
+
 class UserService:
     """用户相关服务"""
     
@@ -313,15 +336,13 @@ class PostService:
             })
             
             posts = []
-            if response.get("RES", 0) == 0 or "RES" not in response:
-                for key, value in response.items():
-                    if key in ("RES", "ERR", "MSG"):
-                        continue
-                    if value and value.get("id"):
-                        posts.append({
-                            "postid": int(value["id"]),
-                            "uid": (value.get("userInfo") or {}).get("uid", "")
-                        })
+            items = _extract_items(response)
+            for value in items:
+                if value and value.get("id"):
+                    posts.append({
+                        "postid": int(value["id"]),
+                        "uid": (value.get("userInfo") or {}).get("uid", "")
+                    })
             
             if posts:
                 logger.info(f"获取帖子列表成功 ({len(posts)} 条)")
@@ -331,6 +352,44 @@ class PostService:
                 
         except Exception as e:
             logger.error(f"获取帖子列表异常: {e}")
+            return []
+    
+    def get_my_posts(self, unique_id: str, pages: int = 1) -> list:
+        """
+        获取自己发布的帖子列表（用于清理残留任务帖、发帖超时确认）
+        
+        Args:
+            unique_id: 用户唯一ID
+            pages: 页码
+        
+        Returns:
+            帖子列表 [{"postid": int, "title": str, "brief": str}]
+        """
+        try:
+            response = self.client.request(GET_FANS_LIST, {
+                "unique_id": unique_id,
+                "other_unique_id": unique_id,
+                "pages": pages
+            })
+            
+            posts = []
+            items = _extract_items(response)
+            for value in items:
+                if value and value.get("id"):
+                    posts.append({
+                        "postid": int(value["id"]),
+                        "title": value.get("title") or "",
+                        "brief": value.get("brief") or ""
+                    })
+            
+            if posts:
+                logger.info(f"获取我的帖子列表成功 ({len(posts)} 条)")
+            else:
+                logger.warning(f"获取我的帖子列表失败或无数据: {response}")
+            return posts
+                
+        except Exception as e:
+            logger.error(f"获取我的帖子列表异常: {e}")
             return []
 
 
