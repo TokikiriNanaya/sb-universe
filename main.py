@@ -441,9 +441,9 @@ class TaskRunner:
             self.task_service.buy_item(self.unique_id)
             time.sleep(self.config.request_delay)
         
-        # 5. 发帖补足（发帖循环同时贡献发帖/浏览/点赞/评论进度）
+        # 5. 发帖补足（每个新帖走 发帖→浏览→点赞→评论→删除，同时贡献多个任务进度）
         need_posts = max(gaps["publish"], gaps["view"], gaps["like"])
-        max_extra_posts = 3  # 上限，避免发太多帖触发风控
+        max_extra_posts = 5  # 上限（每帖贡献浏览+点赞+评论各1次；发太多帖有风控风险）
         post_count = min(need_posts, max_extra_posts)
         for _ in range(post_count):
             if self._task_create_and_process_post():
@@ -451,26 +451,13 @@ class TaskRunner:
                 gaps["view"] = max(0, gaps["view"] - 1)
                 gaps["like"] = max(0, gaps["like"] - 1)
         
-        # 6. 剩余浏览/点赞用社区帖子补足
+        # 6. 新帖不足以覆盖的浏览/点赞缺口：放弃（不再操作社区帖子，只在自己新帖上进行）
         remaining = max(gaps["view"], gaps["like"])
         if remaining > 0:
-            community_posts = self.post_service.get_post_list(self.unique_id)
-            for post in community_posts:
-                if remaining <= 0:
-                    break
-                post_id = post["postid"]
-                if gaps["view"] > 0:
-                    self.post_service.view_post(self.unique_id, post_id)
-                    time.sleep(self.config.request_delay)
-                    gaps["view"] -= 1
-                    remaining -= 1
-                if gaps["like"] > 0:
-                    self.post_service.like_post(self.unique_id, post_id, 1)
-                    time.sleep(self.config.request_delay)
-                    gaps["like"] -= 1
-                    remaining -= 1
-            if remaining > 0:
-                logger.warning(f"社区帖子不足，仍有 {remaining} 次浏览/点赞未补足")
+            logger.warning(
+                f"新帖数量不足以完成浏览/点赞任务，仍有 {remaining} 次未补足"
+                f"（可调大发帖上限 max_extra_posts）"
+            )
         
         # 7. 关注补足（对默认关注ID交替关注/取关）
         for i in range(gaps["follow"]):

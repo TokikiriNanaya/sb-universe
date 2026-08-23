@@ -313,47 +313,6 @@ class PostService:
             logger.error(f"浏览帖子异常: {e}")
             return False
     
-    def get_post_list(self, unique_id: str, tabs_id: int = 401,
-                      pages: int = 1, post_type: int = 1) -> list:
-        """
-        获取社区帖子列表（用于任务补足的点赞/浏览目标）
-        
-        Args:
-            unique_id: 用户唯一ID
-            tabs_id: 版块ID
-            pages: 页码
-            post_type: 帖子类型
-        
-        Returns:
-            帖子列表 [{"postid": int, "uid": str}]
-        """
-        try:
-            response = self.client.request(GET_POST_LIST, {
-                "unique_id": unique_id,
-                "tabs_id": tabs_id,
-                "pages": pages,
-                "type": post_type
-            })
-            
-            posts = []
-            items = _extract_items(response)
-            for value in items:
-                if value and value.get("id"):
-                    posts.append({
-                        "postid": int(value["id"]),
-                        "uid": (value.get("userInfo") or {}).get("uid", "")
-                    })
-            
-            if posts:
-                logger.info(f"获取帖子列表成功 ({len(posts)} 条)")
-            else:
-                logger.warning(f"获取帖子列表失败或无数据: {response}")
-            return posts
-                
-        except Exception as e:
-            logger.error(f"获取帖子列表异常: {e}")
-            return []
-    
     def get_my_posts(self, unique_id: str, pages: int = 1) -> list:
         """
         获取自己发布的帖子列表（用于清理残留任务帖、发帖超时确认）
