@@ -259,31 +259,21 @@ class PostService:
     
     def delete_post(self, post_id: int, delete_type: int = 1) -> bool:
         """
-        删除帖子
+        删除帖子（发送请求后不等待响应，删除是清理性质的操作，结果不重要）
         
         Args:
             post_id: 帖子ID
             delete_type: 删除类型
         
         Returns:
-            是否成功
+            始终返回True（表示已发出删除请求）
         """
-        try:
-            response = self.client.request(DELETE_POST_REPLY_DETAIL, {
-                "type": delete_type,
-                "value": post_id
-            })
-            
-            if response.get("RES") == 0:
-                logger.info(f"删除帖子成功 (帖子ID: {post_id})")
-                return True
-            else:
-                logger.warning(f"删除帖子失败: {response}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"删除帖子异常: {e}")
-            return False
+        self.client.send_no_wait(DELETE_POST_REPLY_DETAIL, {
+            "type": delete_type,
+            "value": post_id
+        })
+        logger.info(f"已发送删除请求 (帖子ID: {post_id})")
+        return True
     
     def view_post(self, unique_id: str, post_id: int) -> bool:
         """

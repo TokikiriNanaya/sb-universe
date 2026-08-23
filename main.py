@@ -125,6 +125,9 @@ class TaskRunner:
         self._task_claim_resonance_reward()     # 共鸣引擎奖励
         self._task_claim_rewards()              # 每日任务奖励
         
+        # 11. 兜底清理本次运行残留的任务帖（删除超时未删掉的）
+        self._task_cleanup_stale_posts()
+        
         logger.info("=" * 50)
         logger.info("所有任务执行完毕")
         logger.info("=" * 50)
@@ -148,19 +151,19 @@ class TaskRunner:
         return None
     
     def _task_cleanup_stale_posts(self):
-        """清理历史残留的任务帖（上次运行发帖超时未删除的；只删任务帖，不动用户帖子）"""
+        """清理历史残留的任务帖（只删任务生成的帖子；发出删除请求即走，不动用户帖子）"""
         logger.info("\n[任务] 清理残留任务帖")
         my_posts = self.post_service.get_my_posts(self.unique_id)
         removed = 0
         for post in my_posts:
             if not self._is_task_post(post):
                 continue
-            if self.post_service.delete_post(post["postid"]):
-                removed += 1
+            self.post_service.delete_post(post["postid"])
+            removed += 1
             time.sleep(self.config.request_delay)
         
         if removed > 0:
-            logger.info(f"已清理 {removed} 个残留任务帖")
+            logger.info(f"已发送 {removed} 个残留任务帖的删除请求")
         else:
             logger.info("无残留任务帖")
     
@@ -207,7 +210,7 @@ class TaskRunner:
         return None
     
     def _task_delete_post(self, post_id: int):
-        """任务: 删除帖子"""
+        """任务: 删除帖子（发出请求即走，不等待响应）"""
         logger.info("\n[任务] 删除帖子")
         self.post_service.delete_post(post_id)
         time.sleep(self.config.request_delay)
@@ -468,10 +471,13 @@ class TaskRunner:
             time.sleep(self.config.request_delay)
     
     def _task_fulfill_daily_tasks(self):
-        """任务完成闭环：检查任务完成情况 → 未完成的重试补足 → 复查，直到满足或达最大轮数"""
+        """任务完成闭环：检查任务完成情况 → 未完成的重试补足 → 复查，直到满足或达最大轮数。
+        若某任务类型补足一轮后缺口无进展（任务 bug/服务器计数异常），自动标记为不可完成并停止补足"""
         logger.info("\n[任务] 任务完成检查与补足")
         
-        max_rounds = 3  # 最大补足轮数，防止不可自动化任务无限重试
+        max_rounds = 3        # 最大补足轮数
+        stubborn = set()      # 补足无效的任务类型（缺口连续不减少）
+        prev_gaps = None      # 上一轮补足前的缺口，用于检测进展
         
         for round_idx in range(1, max_rounds + 1):
             task_data = self.task_service.get_task_list(self.unique_id)
@@ -480,15 +486,35 @@ class TaskRunner:
                 return
             
             gaps = self._calc_task_gaps(task_data)
+            
+            # 检测补足无进展的类型（缺口未减少 = 操作对该任务无效）
+            if prev_gaps is not None:
+                for key in list(gaps):
+                    if gaps[key] > 0 and gaps[key] >= prev_gaps.get(key, 0):
+                        stubborn.add(key)
+                        logger.warning(
+                            f"任务类型[{key}] 补足后缺口未减少，判定为无法完成，停止补足"
+                        )
+                for key in stubborn:
+                    gaps[key] = 0
+            
             if sum(gaps.values()) == 0:
-                logger.info(f"第{round_idx}轮检查: 所有可自动化任务均已完成")
+                if stubborn:
+                    logger.warning(
+                        f"本轮完成检查结束，无法自动完成的任务类型: {sorted(stubborn)}，"
+                        f"其奖励将无法领取（可能是任务 bug 或需人工操作）"
+                    )
+                else:
+                    logger.info(f"第{round_idx}轮检查: 所有可自动化任务均已完成")
                 return
             
             logger.info(f"第{round_idx}轮检查: 任务缺口 {gaps}")
             self._execute_fulfillment(gaps, task_data)
+            prev_gaps = gaps
         
+        remaining = [k for k, v in prev_gaps.items() if v > 0] if prev_gaps else []
         logger.warning(
-            f"经过 {max_rounds} 轮补足仍有任务未完成，可能为不可自动化任务（如邀请/收藏），等待下次运行"
+            f"经过 {max_rounds} 轮补足仍有任务未完成: {sorted(set(remaining) | stubborn)}"
         )
     
     def run(self):

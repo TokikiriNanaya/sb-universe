@@ -131,6 +131,24 @@ class APIClient:
         # 循环结束后理论上不可达（最后一次重试失败会raise）
         raise RuntimeError("unreachable")
     
+    def send_no_wait(self, msgid: int, data: Dict[str, Any], timeout: float = 5.0) -> None:
+        """
+        发送请求但不等待结果（用于删除等不需要响应的操作）
+        
+        特性：短超时、异常忽略、不重试，立即返回，避免阻塞主流程
+        """
+        data['token'] = self.config._config.get('token')
+        data['msgid'] = msgid
+        try:
+            self.session.post(
+                self.config.api_base_url,
+                headers=self.headers,
+                json=data,
+                timeout=timeout
+            )
+        except Exception as e:
+            logger.debug(f"send_no_wait 忽略异常 (msgid={msgid}): {e}")
+    
     def close(self):
         """关闭session"""
         self.session.close()
