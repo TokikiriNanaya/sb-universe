@@ -132,6 +132,32 @@ class UserService:
         except Exception as e:
             logger.error(f"共鸣引擎游玩异常: {e}")
             return False
+    
+    def share_action(self, action: str) -> bool:
+        """
+        上报分享类任务动作（分享帖子/分享战绩）
+        
+        Args:
+            action: 动作标识（如 share_post / share_record，需与服务器约定）
+        
+        Returns:
+            是否成功
+        """
+        try:
+            response = self.client.request(TASK_ACTION, {
+                "action": action
+            })
+            
+            if response.get("RES") == 0:
+                logger.info(f"分享动作上报成功 (action: {action})")
+                return True
+            else:
+                logger.warning(f"分享动作上报失败 (action: {action}): {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"分享动作上报异常 (action: {action}): {e}")
+            return False
 
 
 class PostService:
@@ -159,6 +185,81 @@ class PostService:
                 "unique_id": unique_id,
                 "posts_id": posts_id,
                 "like_type": like_type
+            })
+            
+            if response.get("RES") == 0:
+                logger.info(f"{action}成功 (帖子ID: {posts_id})")
+                return True
+            else:
+                logger.warning(f"{action}失败: {response}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"{action}异常: {e}")
+            return False
+    
+    def share_post(self, unique_id: str, from_post_id: int) -> Optional[int]:
+        """
+        分享/转发帖子（PUBLISH_POST + from_post=源帖ID，实测确认可完成分享帖子任务）
+        
+        Args:
+            unique_id: 用户唯一ID
+            from_post_id: 被分享的源帖ID
+        
+        Returns:
+            转发产生的帖子ID，失败返回None
+        """
+        try:
+            response = self.client.request(PUBLISH_POST, {
+                "unique_id": unique_id,
+                "title": "这是一个任务帖子 - 分享",
+                "tabs_id": 401,
+                "brief": "这是一个任务帖子",
+                "content": "这是一个任务帖子",
+                "imgs": "",
+                "links": "{}",
+                "topics": "",
+                "is_open": True,
+                "ats": "{}",
+                "from_post": from_post_id,
+                "is_vote": False,
+                "extras": "{}"
+            })
+            
+            if response.get("RES") == 0 and "MSG" in response:
+                msg_data = _extract_msg(response)
+                if msg_data:
+                    share_id = msg_data.get("Posts_Id")
+                    if share_id:
+                        logger.info(
+                            f"分享帖子成功 (源帖: {from_post_id}, 分享帖: {share_id})"
+                        )
+                        return share_id
+            logger.warning(f"分享帖子失败: {response}")
+            return None
+                
+        except Exception as e:
+            logger.error(f"分享帖子异常: {e}")
+            return None
+    
+    def collect_post(self, unique_id: str, posts_id: int, collect_type: int = 1) -> bool:
+        """
+        收藏/取消收藏帖子
+        
+        Args:
+            unique_id: 用户唯一ID
+            posts_id: 帖子ID
+            collect_type: 1=收藏, 2=取消收藏
+        
+        Returns:
+            是否成功
+        """
+        action = "收藏" if collect_type == 1 else "取消收藏"
+        try:
+            response = self.client.request(COLLECT_POST, {
+                "unique_id": unique_id,
+                "posts_id": posts_id,
+                "collect_type": collect_type
             })
             
             if response.get("RES") == 0:

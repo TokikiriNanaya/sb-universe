@@ -22,6 +22,11 @@ def get_current_time() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+# 分享战绩的 TASK_ACTION action 值（用户实测确认）
+SHARE_ACTION_RECORD = "record_share"    # 分享战绩（实测确认）
+# 分享帖子=转发帖子（PUBLISH_POST + from_post），无需 TASK_ACTION
+
+
 class TaskRunner:
     """任务执行器"""
     
@@ -103,11 +108,12 @@ class TaskRunner:
         # 6. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试）
         post_id = self._task_create_post()
         
-        # 7. 帖子相关操作（浏览 → 点赞 → 评论 → 删除）
+        # 7. 帖子相关操作（浏览 → 点赞 → 收藏 → 评论 → 删除）
         if post_id:
             # 浏览帖子（带重试，成功后才继续点赞和评论）
             if self._task_view_post_with_retry(post_id):
                 self._task_like(post_id)
+                self._task_collect(post_id)
                 self._task_comment(post_id)
             else:
                 logger.warning("浏览帖子最终失败，跳过点赞和评论操作")
@@ -220,6 +226,13 @@ class TaskRunner:
         logger.info("\n[任务] 点赞操作")
         
         self.post_service.like_post(self.unique_id, post_id, 1)
+        time.sleep(self.config.request_delay)
+    
+    def _task_collect(self, post_id: int):
+        """任务: 收藏帖子（每次都是新帖，无需取消收藏）"""
+        logger.info("\n[任务] 收藏帖子")
+        
+        self.post_service.collect_post(self.unique_id, post_id, 1)
         time.sleep(self.config.request_delay)
     
     def _task_query_stats(self):
@@ -351,14 +364,32 @@ class TaskRunner:
         
         self.task_service.buy_item(self.unique_id)
     
+    def _task_share_post(self) -> bool:
+        """分享帖子：发一个源帖 → 转发（from_post=源帖ID）→ 删除两个帖"""
+        source_id = self._task_create_post()  # 源帖（带超时确认复用）
+        if not source_id:
+            return False
+        
+        share_id = self.post_service.share_post(self.unique_id, source_id)
+        time.sleep(self.config.request_delay)
+        
+        # 清理：删除转发帖和源帖（发出即走，不等待响应）
+        if share_id:
+            self.post_service.delete_post(share_id)
+            time.sleep(self.config.request_delay)
+        self.post_service.delete_post(source_id)
+        time.sleep(self.config.request_delay)
+        return True
+    
     def _task_create_and_process_post(self) -> bool:
-        """创建新帖并完成 浏览→点赞→评论→删除 全流程（任务补足用）"""
+        """创建新帖并完成 浏览→点赞→收藏→评论→删除 全流程（任务补足用）"""
         post_id = self._task_create_post()  # 带重试
         if not post_id:
             return False
         
         if self._task_view_post_with_retry(post_id):
             self._task_like(post_id)
+            self._task_collect(post_id)
             self._task_comment(post_id)
         
         self._task_delete_post(post_id)
@@ -375,8 +406,10 @@ class TaskRunner:
         
         gaps = {
             "sign": 0, "publish": 0, "like": 0, "follow": 0,
-            "buy": 0, "stats": 0, "view": 0, "resonance": 0
+            "buy": 0, "stats": 0, "view": 0, "resonance": 0,
+            "collect": 0, "share_post": 0, "share_record": 0
         }
+        unsupported = set()  # 未支持的任务类型（有缺口但无法自动完成）
         
         for task in task_config:
             if task.get("group") != 0:
@@ -408,8 +441,21 @@ class TaskRunner:
                 gaps["stats"] += gap
             elif task_type == 10:           # 浏览帖子
                 gaps["view"] += gap
+            elif task_type == 13:           # 收藏帖子
+                gaps["collect"] += gap
+            elif task_type == 14:           # 分享帖子
+                gaps["share_post"] += gap
+            elif task_type == 15:           # 分享战绩
+                gaps["share_record"] += gap
             elif task_type == 16:           # 共鸣引擎
                 gaps["resonance"] += gap
+            else:
+                # 未知/未支持的任务类型：提示而不是静默忽略
+                unsupported.add((task_type, task.get("title") or ""))
+        
+        if unsupported:
+            desc = ", ".join(f"{t}(type={ty})" for ty, t in sorted(unsupported))
+            logger.warning(f"检测到暂不支持自动完成的任务类型: {desc}")
         
         return gaps
     
@@ -444,25 +490,37 @@ class TaskRunner:
             self.task_service.buy_item(self.unique_id)
             time.sleep(self.config.request_delay)
         
-        # 5. 发帖补足（每个新帖走 发帖→浏览→点赞→评论→删除，同时贡献多个任务进度）
-        need_posts = max(gaps["publish"], gaps["view"], gaps["like"])
-        max_extra_posts = 5  # 上限（每帖贡献浏览+点赞+评论各1次；发太多帖有风控风险）
+        # 5. 发帖补足（每个新帖走 发帖→浏览→点赞→收藏→评论→删除，同时贡献多个任务进度）
+        need_posts = max(gaps["publish"], gaps["view"], gaps["like"], gaps["collect"])
+        max_extra_posts = 5  # 上限（每帖贡献浏览+点赞+收藏+评论各1次；发太多帖有风控风险）
         post_count = min(need_posts, max_extra_posts)
         for _ in range(post_count):
             if self._task_create_and_process_post():
                 gaps["publish"] = max(0, gaps["publish"] - 1)
                 gaps["view"] = max(0, gaps["view"] - 1)
                 gaps["like"] = max(0, gaps["like"] - 1)
+                gaps["collect"] = max(0, gaps["collect"] - 1)
         
-        # 6. 新帖不足以覆盖的浏览/点赞缺口：放弃（不再操作社区帖子，只在自己新帖上进行）
-        remaining = max(gaps["view"], gaps["like"])
+        # 6. 新帖不足以覆盖的浏览/点赞/收藏缺口：放弃（不再操作社区帖子，只在自己新帖上进行）
+        remaining = max(gaps["view"], gaps["like"], gaps["collect"])
         if remaining > 0:
             logger.warning(
-                f"新帖数量不足以完成浏览/点赞任务，仍有 {remaining} 次未补足"
+                f"新帖数量不足以完成浏览/点赞/收藏任务，仍有 {remaining} 次未补足"
                 f"（可调大发帖上限 max_extra_posts）"
             )
         
-        # 7. 关注补足（对默认关注ID交替关注/取关）
+        # 7. 分享帖子补足（转发帖子：发一个源帖 → 转发 → 删除两个帖）
+        for _ in range(gaps["share_post"]):
+            self._task_share_post()
+        
+        # 8. 分享战绩上报（TASK_ACTION，action=record_share 实测确认）
+        for _ in range(gaps["share_record"]):
+            self.user_service.share_action(SHARE_ACTION_RECORD)
+            time.sleep(self.config.request_delay)
+        if gaps["share_record"] > 0:
+            logger.info(f"分享战绩上报完成 ({gaps['share_record']} 次)")
+        
+        # 9. 关注补足（对默认关注ID交替关注/取关）
         for i in range(gaps["follow"]):
             follow_type = 1 if i % 2 == 0 else 2
             self.social_service.follow_user(
