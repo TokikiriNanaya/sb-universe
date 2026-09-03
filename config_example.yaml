@@ -19,9 +19,6 @@ accounts:
 # API基础URL (一般不需要修改)
 api_base_url: "https://300zjd.tygms.cn/"
 
-# 默认关注的用户ID
-default_follow_id: "p492210972677771264"
-
 # 月度累计签到奖励ID (3天/7天/15天/28天)
 monthly_signin_task_ids: [2001, 2002, 2003, 2004]
 

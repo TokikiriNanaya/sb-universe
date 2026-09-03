@@ -26,6 +26,9 @@ def get_current_time() -> str:
 SHARE_ACTION_RECORD = "record_share"    # 分享战绩（实测确认）
 # 分享帖子=转发帖子（PUBLISH_POST + from_post），无需 TASK_ACTION
 
+# 关注任务补足：拉取社区帖子作者候选的最大翻页数（作者不足时不再扩大骚扰面）
+FOLLOW_CANDIDATE_MAX_PAGES = 5
+
 
 class TaskRunner:
     """任务执行器"""
@@ -93,22 +96,19 @@ class TaskRunner:
         # 1. 查询战绩
         self._task_query_stats()
         
-        # 2. 关注和取消关注
-        self._task_follow_and_unfollow()
-        
-        # 3. 签到
+        # 2. 签到
         self._task_sign_in()
         
-        # 4. 游玩共鸣引擎
+        # 3. 游玩共鸣引擎
         self._task_play_resonance_game()
         
-        # 5. 清理残留任务帖（上次运行发帖超时未删除的）
+        # 4. 清理残留任务帖（上次运行发帖超时未删除的）
         self._task_cleanup_stale_posts()
         
-        # 6. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试）
+        # 5. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试）
         post_id = self._task_create_post()
         
-        # 7. 帖子相关操作（浏览 → 点赞 → 收藏 → 评论 → 删除）
+        # 6. 帖子相关操作（浏览 → 点赞 → 收藏 → 评论 → 删除）
         if post_id:
             # 浏览帖子（带重试，成功后才继续点赞和评论）
             if self._task_view_post_with_retry(post_id):
@@ -120,18 +120,18 @@ class TaskRunner:
             # 删除帖子
             self._task_delete_post(post_id)
         
-        # 8. 购买道具
+        # 7. 购买道具
         self._task_buy_item()
         
-        # 9. 任务驱动补足（读取今日随机任务，按缺口补足动作次数）
+        # 8. 任务驱动补足（读取今日随机任务，按缺口补足动作次数，含关注任务）
         self._task_fulfill_daily_tasks()
         
-        # 10. 领取所有奖励（统一放到任务最后）
+        # 9. 领取所有奖励（统一放到任务最后）
         self._task_claim_monthly_rewards()      # 月度累计签到奖励
         self._task_claim_resonance_reward()     # 共鸣引擎奖励
         self._task_claim_rewards()              # 每日任务奖励
         
-        # 11. 兜底清理本次运行残留的任务帖（删除超时未删掉的）
+        # 10. 兜底清理本次运行残留的任务帖（删除超时未删掉的）
         self._task_cleanup_stale_posts()
         
         logger.info("=" * 50)
@@ -254,16 +254,75 @@ class TaskRunner:
         )
         time.sleep(self.config.request_delay)
     
-    def _task_follow_and_unfollow(self):
-        """任务: 关注和取消关注"""
-        logger.info("\n[任务] 关注操作")
-        follow_id = self.config.default_follow_id
+    def _fetch_follow_gap(self) -> Optional[int]:
+        """
+        获取当前"关注"任务的任务缺口（关注后复查计数用）
+
+        Returns:
+            关注任务缺口数（>=0），任务列表获取失败返回 None
+        """
+        task_data = self.task_service.get_task_list(self.unique_id)
+        if not task_data:
+            return None
+        return self._calc_task_gaps(task_data).get("follow", 0)
+
+    def _task_fulfill_follow(self, gap: int) -> None:
+        """
+        关注任务补足：从社区帖子列表动态找真实作者作为关注对象（每次不同的人），
+        关注后复查任务进度确认是否被计数，然后立即取关，直到完成任务或候选耗尽。
         
-        self.social_service.follow_user(self.unique_id, follow_id, 1)
-        time.sleep(self.config.request_delay)
+        改版后服务器按"关注了不同的人"计数，固定关注同一ID不再有效；
+        取关保证账号不残留关注，且同一作者次日仍可作为新关注对象。
+        无进展（作者都已被关注过等）时留给上层无进展检测判定，不无限重试。
+        """
+        if gap <= 0:
+            return
+        logger.info(f"[任务] 关注任务补足 (缺口 {gap})")
         
-        self.social_service.follow_user(self.unique_id, follow_id, 2)
-    
+        tried_uids = set()    # 本次已尝试过的作者，避免重复
+        made = 0              # 被任务实际计数的关注次数
+        orig_gap = gap
+        
+        for page in range(1, FOLLOW_CANDIDATE_MAX_PAGES + 1):
+            posts = self.post_service.get_post_list(self.unique_id, pages=page)
+            if not posts:
+                break  # 拉不到更多帖子，候选耗尽
+            
+            for post in posts:
+                if made >= orig_gap:
+                    return
+                uid = post.get("uid") or ""
+                if not uid or uid == self.unique_id or uid in tried_uids:
+                    continue  # 无作者 / 自己发的任务帖 / 重复作者
+                tried_uids.add(uid)
+                
+                if not self.social_service.follow_user(self.unique_id, uid, 1):
+                    continue  # 服务器拒绝（已关注过/当日已计），换下一位作者
+                time.sleep(self.config.request_delay)
+                
+                # 每次关注后复查任务进度，确认是否真的被计数
+                new_gap = self._fetch_follow_gap()
+                
+                # 无论是否计数都立即取关，保持账号不残留关注
+                self.social_service.follow_user(self.unique_id, uid, 2)
+                time.sleep(self.config.request_delay)
+                
+                if new_gap is not None and new_gap < gap:
+                    gap = new_gap
+                    made += 1
+                    logger.info(f"关注成功已计数 (用户ID: {uid}, 剩余缺口 {gap})")
+                # new_gap 未减少：该作者今日关注不计（去重），继续找下一位
+                if made >= orig_gap:
+                    return
+        
+        if made > 0:
+            logger.info(f"关注补足完成 {made} 次，仍有 {gap} 次缺口等待复查")
+        else:
+            logger.warning(
+                "关注补足无有效计数：候选作者均不可用或已关注过，"
+                "若复查后缺口未减少将停止补足"
+            )
+
     def _task_sign_in(self):
         """任务: 签到"""
         logger.info("\n[任务] 签到")
@@ -520,13 +579,9 @@ class TaskRunner:
         if gaps["share_record"] > 0:
             logger.info(f"分享战绩上报完成 ({gaps['share_record']} 次)")
         
-        # 9. 关注补足（对默认关注ID交替关注/取关）
-        for i in range(gaps["follow"]):
-            follow_type = 1 if i % 2 == 0 else 2
-            self.social_service.follow_user(
-                self.unique_id, self.config.default_follow_id, follow_type
-            )
-            time.sleep(self.config.request_delay)
+        # 9. 关注任务补足（动态从社区帖子作者选人，关注成功计数后即时取关）
+        if gaps["follow"] > 0:
+            self._task_fulfill_follow(gaps["follow"])
     
     def _task_fulfill_daily_tasks(self):
         """任务完成闭环：检查任务完成情况 → 未完成的重试补足 → 复查，直到满足或达最大轮数。

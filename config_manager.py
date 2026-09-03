@@ -67,11 +67,6 @@ class Config:
         return self._config.get('api_base_url', 'https://300zjd.tygms.cn/')
     
     @property
-    def default_follow_id(self) -> str:
-        """获取默认关注用户ID"""
-        return self._config.get('default_follow_id', 'p492210972677771264')
-    
-    @property
     def monthly_signin_task_ids(self) -> list:
         """获取月度累计签到奖励ID列表 (3天/7天/15天/28天)"""
         return self._config.get('monthly_signin_task_ids', [2001, 2002, 2003, 2004])

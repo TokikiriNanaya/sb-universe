@@ -404,6 +404,50 @@ class PostService:
             logger.error(f"浏览帖子异常: {e}")
             return False
     
+    def get_post_list(self, unique_id: str, tabs_id: int = 401,
+                      pages: int = 1, post_type: int = 1) -> list:
+        """
+        获取社区帖子列表（用于关注任务动态寻找真实作者作为关注候选）
+
+        实测(2026-09-03)：响应顶层为数组，帖子字段扁平化，作者为帖子的 unique_id 字段
+        （旧版 userInfo.uid 嵌套结构已改版失效）
+
+        Args:
+            unique_id: 用户唯一ID
+            tabs_id: 版块ID
+            pages: 页码
+            post_type: 帖子类型
+
+        Returns:
+            帖子列表 [{"postid": int, "uid": str}]（uid 为作者用户ID，空表示无作者信息）
+        """
+        try:
+            response = self.client.request(GET_POST_LIST, {
+                "unique_id": unique_id,
+                "tabs_id": tabs_id,
+                "pages": pages,
+                "type": post_type
+            })
+
+            posts = []
+            items = _extract_items(response)
+            for value in items:
+                if value and value.get("id"):
+                    posts.append({
+                        "postid": int(value["id"]),
+                        "uid": str(value.get("unique_id") or "")
+                    })
+
+            if posts:
+                logger.info(f"获取社区帖子列表成功 ({len(posts)} 条, 第{pages}页)")
+            else:
+                logger.warning(f"获取社区帖子列表失败或无数据: {response}")
+            return posts
+
+        except Exception as e:
+            logger.error(f"获取社区帖子列表异常: {e}")
+            return []
+
     def get_my_posts(self, unique_id: str, pages: int = 1) -> list:
         """
         获取自己发布的帖子列表（用于清理残留任务帖、发帖超时确认）

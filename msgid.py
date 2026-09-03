@@ -19,6 +19,8 @@ LIKE_POST = 1018                # 点赞/取消点赞（like_type: 1=赞 2=取�
 COLLECT_POST = 1023             # 收藏/取消收藏帖子（collect_type: 1=收藏 2=取消）
 GET_PERSONAL_POSTS = 1028       # 评论/回复帖子
 GET_FANS_LIST = 1027            # 我的发布列表（枚举名误导，参数: unique_id+other_unique_id+pages）
+GET_FOCUS_LIST = 1026           # 关注/粉丝列表（unique_id + type: 1=我关注的人 2=我的粉丝，响应含 unique_id）
+GET_POST_LIST = 1033            # 社区帖子列表（参数: unique_id+tabs_id+pages+type；响应数组，作者=帖子的 unique_id）
 GET_USER_DETAIL = 1032          # 我的关注列表（枚举名误导，之前误用于"我的发布"）
 GET_POST_DETAIL_CACHE = 1056    # 浏览帖子（post_id）
 DELETE_POST_REPLY_DETAIL = 1085 # 删除（type=1 删帖 / 2、3 删回复，value=ID）
