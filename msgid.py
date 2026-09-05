@@ -14,6 +14,7 @@ GET_BAG_LIST = 1074             # 领取任务奖励（task_id_list 支持逗号
 TASK_ACTION = 1116              # 任务动作（action 区分，如 resonance_game）
 
 # ==================== 帖子相关 ====================
+UPLOAD_IMAGE = 1016             # 上传图片（unique_id+img_key+img_type+img_bas64；响应 MSG[img_key]=图片文件名）
 PUBLISH_POST = 1017             # 发帖
 LIKE_POST = 1018                # 点赞/取消点赞（like_type: 1=赞 2=取消）
 COLLECT_POST = 1023             # 收藏/取消收藏帖子（collect_type: 1=收藏 2=取消）
@@ -33,6 +34,7 @@ GET_STORE_LIST = 1068           # 购买道具（shop_item_id + address_id）
 
 # 写操作接口：超时后不确定是否已执行，网络层不对其做"超时重试"，防止重复执行
 WRITE_MSGIDS = {
+    UPLOAD_IMAGE,                # 上传图片
     PUBLISH_POST,                # 发帖
     LIKE_POST,                   # 点赞
     COLLECT_POST,                # 收藏

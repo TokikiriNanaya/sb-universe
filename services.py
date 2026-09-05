@@ -307,8 +307,46 @@ class PostService:
             logger.error(f"评论异常: {e}")
             return False
     
-    def create_post(self, unique_id: str, title: str, tabs_id: int, 
-                   brief: str, content: str) -> Optional[int]:
+    def upload_image(self, unique_id: str, img_bas64: str, img_type: str = "png",
+                     img_key: str = "image|1") -> Optional[str]:
+        """
+        上传图片（发带图帖用）。实测(2026-09-03)逆向前端确认：
+        - 请求参数: unique_id + img_key(如 image|1) + img_type(如 png) + img_bas64(纯base64，不含 data: 前缀)
+        - 响应: MSG[img_key] = 图片文件名（作为发帖 imgs.url 使用）
+        
+        Args:
+            unique_id: 用户唯一ID
+            img_bas64: 图片的纯 base64 数据
+            img_type: 图片类型后缀（png/jpg）
+            img_key: 图片键，需与帖子 content 中的 [image|N] 标记对应
+        
+        Returns:
+            图片文件名，失败返回None
+        """
+        try:
+            response = self.client.request(UPLOAD_IMAGE, {
+                "unique_id": unique_id,
+                "img_key": img_key,
+                "img_type": img_type,
+                "img_bas64": img_bas64
+            })
+
+            if response.get("RES") == 0:
+                msg_data = _extract_msg(response)
+                if isinstance(msg_data, dict):
+                    img_name = msg_data.get(img_key)
+                    if img_name:
+                        logger.info(f"图片上传成功 (key: {img_key}, 文件名: {img_name})")
+                        return str(img_name)
+            logger.warning(f"图片上传失败: {response}")
+            return None
+
+        except Exception as e:
+            logger.error(f"图片上传异常: {e}")
+            return None
+
+    def create_post(self, unique_id: str, title: str, tabs_id: int,
+                   brief: str, content: str, imgs: str = "") -> Optional[int]:
         """
         创建帖子
         
@@ -317,7 +355,8 @@ class PostService:
             title: 标题
             tabs_id: 版块ID
             brief: 简介
-            content: 内容
+            content: 内容（带图时含 [image|N] 标记）
+            imgs: 图片JSON字符串，形如 '{"image|1":{"url":"xxx.png","extra":""}}'，无图传 ""
         
         Returns:
             帖子ID，失败返回None
@@ -329,7 +368,7 @@ class PostService:
                 "tabs_id": tabs_id,
                 "brief": brief,
                 "content": content,
-                "imgs": "",
+                "imgs": imgs,
                 "links": "{}",
                 "topics": "",
                 "is_open": True,

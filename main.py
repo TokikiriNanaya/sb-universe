@@ -1,6 +1,7 @@
 """
 300英雄宅基地自动任务工具 - 主程序
 """
+import json
 import sys
 import time
 from datetime import datetime
@@ -28,6 +29,30 @@ SHARE_ACTION_RECORD = "record_share"    # 分享战绩（实测确认）
 
 # 关注任务补足：拉取社区帖子作者候选的最大翻页数（作者不足时不再扩大骚扰面）
 FOLLOW_CANDIDATE_MAX_PAGES = 5
+
+# 图文帖任务(17)发帖附带图片：内置一张程序生成的 256x256 蓝色渐变 PNG（纯base64）。
+# 不依赖外部文件、不含隐私内容；帖子发完即删。图片键与 content 中 [image|1] 标记对应。
+TASK_POST_IMAGE_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAFBklEQVR42u3TB5sIBByA8f9nEGVTtsO5w9mbs/c88+x59t6cvQkl"
+    "QqSUCCWFKCkRIkV9m/7f432f5/cVfjHw8H8SVgw49K+ElQHeSFgx4OAbCSsDvJawov/B1xJW9D/wj4RlAMED7P9bwsoArySs6Lf/"
+    "lYQV/fb9JWEZQPAAe19KWFG696WElQFeSFhRuueFhJUB/pSwonT3cwkr+u5+LmFlgGcSVvTd9UzCygBPJazos/OphJUB/pCwMsAT"
+    "CSv67HgiYWWAxxJW9N7+WMLKAL9LWAYQPEDlIwkrelU+krCi17bfJKwM8KuEZQDBA2x9KGFFz60PJazoueUXCcsAogd4IGFFj80P"
+    "JKwM8LOEFT02/SRhGUD0APclrOi+8b6ElQHuSVjRfcM9CSsD/ChhZYC7ElZ0W39XwsoAdySs6LbujoSVAW5LWNF13W0JK7qu/UHC"
+    "MoDgAdZ8L2FlgFsSVnRZc0vCii6rv5OwDCB4gFU3JazovOqmhJUBvpWwovPKbyQsAwgeYMUNCSs6rbghYWWA6xJWdFp+XcLKANck"
+    "rOi47JqElQG+lrAywFUJKzouvSphZYArElZ0WHJFwsoAX0lYBhA8wOLLEla0X3xZwor2i76UsDLAFxKWAQQPUHFJwoqSiksSVpQs"
+    "/FzCMoDoAT6TsKJkwUUJK9otuChhRbv5n0pYBhA9wAUJK9rOuyBhZYDzEla0nXtewsoAn0hYGeCchBVt5pyTsDLAWQkr2sw+K2Fl"
+    "gDMSVhTPPiNhRfGsjyWsDHBaworimaclrAxwSsKKopmnJKwomvGRhGUAwQNMPylhRevpJyWsDPChhBWtp30gYRlA8ADlJySsKCw/"
+    "IWFlgOMSVhROPS5hZYBjEla0mnJMwsoA70tYGeCohBWtJh+VsDLAEQkrWk46ImFlgMMSlgEEDzDxkISVAQ5KWNFiwkEJKwMckLAM"
+    "IHiAsv0SVhSU7ZewomD8PgnLAKIH2CthRcG4PRJWNB+3R8KK5mN3S1gGED3ALgkrmo3ZJWFlgJ0SVjQbvVPCygA7JKwMsF3Ciqaj"
+    "tktYGaBSwoqmIyslrAywTcKKJiO3SVjRZMRWCSsDbJGwosnwLRJWBtgsYUXj4ZslrGg8bJOEZQDBAwzdKGFFo6EbJawMsEHCikZD"
+    "1ktYBhA8wOB1ElY0HLxOwsoAayWsaDhorYSVAdZIWNFw4GoJKxoMXC1hZYBVElY0GLBKwsoAKyWseK//SgkrA6yQsAwgeIB+yyWs"
+    "DLBMwop3S5dJWBlgqYRlAMED9F0iYUX9vkskrKjfZ7GEZQDRAyySsKJ+7woJK+r1rpCwol6vhRKWAUQPsEDCiro9F0hYGWC+hBV1"
+    "e8yTsAwgeoC5ElbU6T5XwsoAcySsqNNtjoSVAWZLWFG722wJK2p3nSVhZYCZElbU7jJTwsoAMySsqNVlhoQVtTpPl7AMIHiATtMk"
+    "rAxQLmFFzU7lElbU7DhVwjKA4AE6TJGwokaHKRJWBpgsYUWN9pMlrAwwScKKGiUTJayoXjJRwsoAEySsqN5ugoSVAcokrHinbZmE"
+    "lQHGS1gGEDxAm3ESVgYYK2HF28VjJawMMEbCMoDgAYpGS1hRrWi0hBXVWo+SsDLASAnLAIIHKBwhYUXVwhESVlRtNVzCMoDoAYZJ"
+    "WPFWy2ESVgYYKmHFWy2GSFgGED3AYAkrqhQMlrAywCAJK6o0HyRhZYCBEpYBhPY/FSAslgiJ1T8AAAAASUVORK5CYII="
+)
+TASK_POST_IMAGE_TYPE = "png"
 
 
 class TaskRunner:
@@ -105,8 +130,9 @@ class TaskRunner:
         # 4. 清理残留任务帖（上次运行发帖超时未删除的）
         self._task_cleanup_stale_posts()
         
-        # 5. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试）
-        post_id = self._task_create_post()
+        # 5. 发帖（创建新帖子，后续所有帖子操作都针对此帖；失败自动确认重试。
+        #    今日含图文帖任务时带图发布，一次发帖同时覆盖图文帖与浏览/点赞等）
+        post_id = self._task_create_post(with_image=self._task_need_image_post())
         
         # 6. 帖子相关操作（浏览 → 点赞 → 收藏 → 评论 → 删除）
         if post_id:
@@ -173,12 +199,32 @@ class TaskRunner:
         else:
             logger.info("无残留任务帖")
     
-    def _task_create_post(self) -> Optional[int]:
-        """任务: 发帖（失败自动确认重试，返回帖子ID供后续操作使用）"""
-        logger.info("\n[任务] 发帖")
+    def _task_create_post(self, with_image: bool = False) -> Optional[int]:
+        """
+        任务: 发帖（失败自动确认重试，返回帖子ID供后续操作使用）
+        
+        Args:
+            with_image: 是否附带图片（图文帖任务用）。带图时先上传内置图片，
+                         content 加 [image|1] 标记、imgs 填上传文件名；上传失败降级为普通帖
+        """
+        logger.info("\n[任务] 发帖" + ("（带图）" if with_image else ""))
         title = f"这是一个任务帖子 - {get_current_time()}"
         brief = "这是一个任务帖子"
         content = "这是一个任务帖子"
+        imgs = ""
+        
+        if with_image:
+            img_name = self.post_service.upload_image(
+                self.unique_id, TASK_POST_IMAGE_B64, TASK_POST_IMAGE_TYPE
+            )
+            if img_name:
+                content = "[image|1] 这是一个任务帖子"
+                imgs = json.dumps(
+                    {"image|1": {"url": img_name, "extra": ""}},
+                    ensure_ascii=False
+                )
+            else:
+                logger.warning("图片上传失败，降级为普通发帖（图文帖任务将无法计数）")
         
         max_retries = self.config.max_retries
         retry_delay = self.config.retry_delay
@@ -189,7 +235,8 @@ class TaskRunner:
                 title,
                 tabs_id=401,
                 brief=brief,
-                content=content
+                content=content,
+                imgs=imgs
             )
             
             if post_id:
@@ -323,6 +370,18 @@ class TaskRunner:
                 "若复查后缺口未减少将停止补足"
             )
 
+    def _task_need_image_post(self) -> bool:
+        """
+        今日任务是否包含待完成的图文帖任务(17)（决定主流程发帖是否带图）
+
+        Returns:
+            有图文帖缺口返回 True；任务列表获取失败或缺口为0返回 False
+        """
+        task_data = self.task_service.get_task_list(self.unique_id)
+        if not task_data:
+            return False
+        return self._calc_task_gaps(task_data).get("post_image", 0) > 0
+
     def _task_sign_in(self):
         """任务: 签到"""
         logger.info("\n[任务] 签到")
@@ -440,9 +499,9 @@ class TaskRunner:
         time.sleep(self.config.request_delay)
         return True
     
-    def _task_create_and_process_post(self) -> bool:
+    def _task_create_and_process_post(self, with_image: bool = False) -> bool:
         """创建新帖并完成 浏览→点赞→收藏→评论→删除 全流程（任务补足用）"""
-        post_id = self._task_create_post()  # 带重试
+        post_id = self._task_create_post(with_image=with_image)  # 带重试
         if not post_id:
             return False
         
@@ -464,7 +523,7 @@ class TaskRunner:
         }
         
         gaps = {
-            "sign": 0, "publish": 0, "like": 0, "follow": 0,
+            "sign": 0, "publish": 0, "post_image": 0, "like": 0, "follow": 0,
             "buy": 0, "stats": 0, "view": 0, "resonance": 0,
             "collect": 0, "share_post": 0, "share_record": 0
         }
@@ -488,8 +547,10 @@ class TaskRunner:
             
             if task_type == 1:              # 签到
                 gaps["sign"] = max(gaps["sign"], gap)
-            elif task_type in (2, 17):      # 发帖 / 发布图文贴
+            elif task_type == 2:            # 发帖（任意帖子都计数）
                 gaps["publish"] += gap
+            elif task_type == 17:           # 发布图文贴（必须带图才能计数，发带图帖）
+                gaps["post_image"] += gap
             elif task_type == 3:            # 点赞
                 gaps["like"] += gap
             elif task_type == 4:            # 关注
@@ -549,22 +610,29 @@ class TaskRunner:
             self.task_service.buy_item(self.unique_id)
             time.sleep(self.config.request_delay)
         
-        # 5. 发帖补足（每个新帖走 发帖→浏览→点赞→收藏→评论→删除，同时贡献多个任务进度）
-        need_posts = max(gaps["publish"], gaps["view"], gaps["like"], gaps["collect"])
+        # 5. 发帖补足（每个新帖走 发帖→浏览→点赞→收藏→评论→删除，同时贡献多个任务进度。
+        #    存在图文帖任务(17)缺口时优先发带图帖——带图帖同时计入发帖与图文帖）
+        need_posts = max(
+            gaps["publish"], gaps["post_image"],
+            gaps["view"], gaps["like"], gaps["collect"]
+        )
         max_extra_posts = 5  # 上限（每帖贡献浏览+点赞+收藏+评论各1次；发太多帖有风控风险）
         post_count = min(need_posts, max_extra_posts)
         for _ in range(post_count):
-            if self._task_create_and_process_post():
+            with_image = gaps["post_image"] > 0  # 还有图文帖缺口就发带图帖
+            if self._task_create_and_process_post(with_image=with_image):
                 gaps["publish"] = max(0, gaps["publish"] - 1)
+                if with_image:
+                    gaps["post_image"] = max(0, gaps["post_image"] - 1)
                 gaps["view"] = max(0, gaps["view"] - 1)
                 gaps["like"] = max(0, gaps["like"] - 1)
                 gaps["collect"] = max(0, gaps["collect"] - 1)
         
-        # 6. 新帖不足以覆盖的浏览/点赞/收藏缺口：放弃（不再操作社区帖子，只在自己新帖上进行）
-        remaining = max(gaps["view"], gaps["like"], gaps["collect"])
+        # 6. 新帖不足以覆盖的浏览/点赞/收藏/图文帖缺口：放弃（只在自己新帖上进行）
+        remaining = max(gaps["view"], gaps["like"], gaps["collect"], gaps["post_image"])
         if remaining > 0:
             logger.warning(
-                f"新帖数量不足以完成浏览/点赞/收藏任务，仍有 {remaining} 次未补足"
+                f"新帖数量不足以完成浏览/点赞/收藏/图文帖任务，仍有 {remaining} 次未补足"
                 f"（可调大发帖上限 max_extra_posts）"
             )
         
